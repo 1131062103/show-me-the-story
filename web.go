@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
 	"time"
 )
 
@@ -91,6 +93,8 @@ func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, cfgPath s
 		fmt.Printf(" [系统] 小说标题: 《%s》\n", state.Title)
 	}
 
+	go openBrowser(fmt.Sprintf("http://localhost%s", port))
+
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, " [错误] 服务器启动失败: %v\n", err)
 		os.Exit(1)
@@ -117,4 +121,18 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func openBrowser(url string) {
+	time.Sleep(500 * time.Millisecond)
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	cmd.Start()
 }
