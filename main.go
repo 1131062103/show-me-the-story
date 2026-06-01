@@ -6,10 +6,10 @@ import (
 )
 
 const (
-	progressFile = "progress.json"
-	configFile   = "config.json"
+	progressFile  = "progress.json"
+	configFile    = "config.json"
 	apiConfigFile = "api.json"
-	defaultPort  = ":6090"
+	defaultPort   = ":8090"
 )
 
 func main() {

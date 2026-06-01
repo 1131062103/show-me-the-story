@@ -250,4 +250,32 @@ var DefaultPrompts = PromptsConfig{
 1. 大纲需要承接已有章节的故事线，保持连贯性
 2. 每章大纲应包含具体的情节发展，而非笼统的描述
 3. 请严格以JSON格式输出，不要添加任何额外文字`,
+
+	SettingsReconciliation: `你是一位专业的小说一致性审查编辑。用户修改了故事设定，但已有部分已确认章节。请检查新设定与已有内容的一致性，并自动调整设定使其兼容。
+
+【用户的新设定】
+故事类型：{{.NewType}}
+写作风格：{{.NewWritingStyle}}
+角色设定：{{.NewCharacterSetting}}
+世界观：{{.NewWorldSetting}}
+核心写作要求：{{.NewCoreRequirements}}
+
+【已有已确认章节摘要】
+{{.ExistingSummaries}}
+
+请以JSON格式返回调整后的设定：
+{
+  "type": "...",
+  "writing_style": "...",
+  "character_setting": "...",
+  "world_setting": "...",
+  "core_requirements": "...",
+  "explanation": "说明做了哪些调整及原因"
+}
+
+调整原则：
+1. 已有章节内容不可更改，设定必须与之兼容
+2. 尽量保留用户修改的意图
+3. 如有不可调和矛盾，以已有内容为准微调新设定
+4. 不冲突的部分直接保留用户新设定`,
 }

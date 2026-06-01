@@ -39,6 +39,7 @@ type PromptsConfig struct {
 	ForeshadowUpdate              string `json:"foreshadow_update"`
 	ContentAnalysis               string `json:"content_analysis"`
 	ContinuationOutlineGeneration string `json:"continuation_outline_generation"`
+	SettingsReconciliation        string `json:"settings_reconciliation"`
 }
 
 func DefaultAPIConfig() *APIConfig {
@@ -156,5 +157,8 @@ func (p *PromptsConfig) applyDefaults() {
 	}
 	if p.ContinuationOutlineGeneration == "" {
 		p.ContinuationOutlineGeneration = DefaultPrompts.ContinuationOutlineGeneration
+	}
+	if p.SettingsReconciliation == "" {
+		p.SettingsReconciliation = DefaultPrompts.SettingsReconciliation
 	}
 }

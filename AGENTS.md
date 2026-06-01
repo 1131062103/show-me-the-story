@@ -8,7 +8,7 @@
 
 - **Go 版本**：1.25.1
 - **模块名**：`showmethestory`
-- **默认端口**：`:6090`（可通过 `PORT` 环境变量覆盖）
+- **默认端口**：`:8090`（可通过 `PORT` 环境变量覆盖）
 
 ## 编译与运行
 
@@ -30,10 +30,11 @@ go build -o show-me-the-story.exe .   # 编译
                   │
                   ├─ SSE (logger.go) ← 实时日志/进度/事件推送到前端
                   │
-                  ├─ outline.go     ← 大纲阶段逻辑
+                  ├─ outline.go     ← 大纲阶段逻辑 + EditChapterOutline
                   ├─ writing.go     ← 写作阶段逻辑
                   ├─ foreshadow.go  ← 伏笔系统
-                  ├─ continue.go    ← 续写功能
+                  ├─ continue.go    ← 续写功能（导入分析）
+                  ├─ reconcile.go   ← 设定协调逻辑（AI 自动兼容新旧设定）
                   ├─ api.go         ← OpenAI API 调用 + 重试
                   ├─ config.go      ← 配置结构体 + 加载/保存
                   ├─ state.go       ← 进度/章节/伏笔结构体 + 持久化
@@ -49,13 +50,14 @@ go build -o show-me-the-story.exe .   # 编译
 | `config.go` | `APIConfig`、`Config`、`StoryConfig`、`PromptsConfig` 结构体，`LoadAPIConfig`、`LoadConfig`、`saveAPIConfig`、`saveConfig`、`applyDefaults` |
 | `state.go` | `Progress`、`ChapterState`、`Foreshadow` 结构体，`LoadProgress`、`SaveProgress`、`SaveChapterMarkdown` |
 | `api.go` | `CallAPI`（同步）、`CallAPIStream`（流式）、`CallAPIWithRetry`/`CallAPIWithRetryLog`（无限重试）、`CallAPIStreamWithRetry`/`CallAPIStreamWithRetryLog` |
-| `outline.go` | `generateOutline`、`reviseOutline`、`GenerateOutlineAction`、`ReviseOutlineAction`、`ConfirmOutlineAction`、`cleanJSONResponse` |
+| `outline.go` | `generateOutline`、`reviseOutline`、`GenerateOutlineAction`、`ReviseOutlineAction`、`ConfirmOutlineAction`、`EditChapterOutline`、`cleanJSONResponse` |
 | `writing.go` | `GenerateChapterAction`、`ReviseChapterAction`、`ConfirmChapterAction`、章节内容生成/摘要/事实核查/流式输出、`buildHistorySummary` |
 | `foreshadow.go` | `SuggestForeshadows`、`UpdateForeshadows`、伏笔格式化注入、伏笔告警、`NextForeshadowID` |
 | `continue.go` | `AnalyzeExistingContent`、`ImportContinueAction`、`GenerateContinuationOutline`、`splitContentByChapters` |
+| `reconcile.go` | `ReconcileSettingsAction`、`regeneratePendingOutlines`、设定协调逻辑 |
 | `handlers.go` | 所有 HTTP handler、`tryStartTask`/`endTask` 互斥、`writeJSON`/`writeError`、`writeFileAtomic` |
 | `web.go` | 路由注册、CORS/日志中间件、静态文件服务、`startWebServer` |
-| `logger.go` | `LogBroadcaster`（SSE 广播）、`Log`/`Info`/`Error`/`Warn`/`Success`/`StepInfo`/`StreamProgress`、`Emit`/`TaskStart`/`TaskEnd`/`ContentChunk` |
+| `logger.go` | `LogBroadcaster`（SSE 广播）、`Log`/`Info`/`Error`/`Warn`/`Success`/`StepInfo`/`StreamProgress`、`Emit`/`TaskStart`/`TaskEnd`/`ContentChunk`、`SettingsReconciled` |
 | `prompts.go` | `RenderPrompt`（`{{.KeyName}}` 替换）、`DefaultPrompts` 变量（所有内置提示词模板） |
 | `filesys.go` | `writeFileImpl`、`deleteFileImpl`、`renameFileImpl` |
 | `static/index.html` | 完整前端（HTML + CSS + JS），单文件，vanilla JS |
@@ -131,15 +133,31 @@ planted → progressing → resolved
 ## 续写功能流程
 
 ```
-粘贴已有文本 → POST /api/continue/import (异步分析)
+大纲页空状态 → 点击"导入已有内容" → 展开 textarea
+  → 粘贴已有文本 → POST /api/continue/import (异步分析)
   → SSE continue_analysis 事件返回 ContinueAnalysis
-  → 前端展示可编辑的元数据 + 章节大纲/摘要
-  → 用户编辑后 POST /api/continue/confirm
+  → 大纲页展示可编辑的元数据 + 章节大纲/摘要
+  → 用户编辑后点击"确认导入" → POST /api/continue/confirm
   → ImportContinueAction：设置 Phase="outline"，已有章节 status=accepted
-  → 跳转大纲页，显示"生成后续大纲"按钮
+  → 大纲页显示已导入的 accepted 章节 + "生成后续大纲"按钮
   → POST /api/outline/generate-continuation (异步)
   → 追加续写章节为 pending
   → 确认大纲 → 进入写作阶段
+```
+
+## 设定协调流程
+
+```
+配置页修改设定 → 保存故事配置 (PUT /api/config)
+  → 若存在已确认章节 → POST /api/settings/reconcile (异步)
+  → ReconcileSettingsAction：
+    1. 收集 accepted 章节摘要
+    2. AI 比对新设定 vs 已有内容，输出兼容设定
+    3. 更新 cfg.Story + state.StoryConfigSnapshot
+    4. 若存在 pending 章节，基于新设定重新生成其大纲
+    5. 原子保存 config.json + progress.json
+    6. SSE 推送 settings_reconciled 事件
+  → 前端收到事件后重新加载 config/progress，显示协调结果
 ```
 
 ## API 端点一览
@@ -157,10 +175,13 @@ planted → progressing → resolved
 | POST | `/api/outline/confirm` | 同步 | 确认大纲 |
 | POST | `/api/outline/revise` | 异步 | 修订大纲 |
 | POST | `/api/outline/generate-continuation` | 异步 | 生成续写大纲 |
+| PUT | `/api/outline/{num}` | 同步 | 编辑指定 pending 章节大纲 |
+| POST | `/api/settings/reconcile` | 异步 | 协调设定与已有内容 |
 | POST | `/api/chapter/generate` | 异步 | 生成章节 |
 | POST | `/api/chapter/confirm` | 同步 | 确认章节 |
 | POST | `/api/chapter/revise` | 异步 | 修订章节 |
 | DELETE | `/api/chapter` | 同步 | 删除最后章节 |
+| DELETE | `/api/chapters/from/{num}` | 同步 | 从第 N 章删除到末尾 |
 | DELETE | `/api/outline` | 同步 | 删除大纲 |
 | GET | `/api/foreshadows` | 同步 | 获取伏笔列表 |
 | POST | `/api/foreshadows/suggest` | 异步 | AI 建议伏笔 |
@@ -184,6 +205,7 @@ planted → progressing → resolved
 | `stream_progress` | `{chapter_idx, char_count}` | 流式生成字符数进度（每 500 字） |
 | `foreshadow_suggestions` | `ForeshadowSuggestion[]` | 伏笔建议结果 |
 | `continue_analysis` | `ContinueAnalysis` | 续写分析结果 |
+| `settings_reconciled` | `{explanation, changed_fields}` | 设定协调完成 |
 
 ## PromptsConfig 字段
 
@@ -198,6 +220,7 @@ planted → progressing → resolved
 | `ForeshadowUpdate` | `foreshadow_update` | 伏笔状态更新 |
 | `ContentAnalysis` | `content_analysis` | 续写内容分析 |
 | `ContinuationOutlineGeneration` | `continuation_outline_generation` | 续写大纲生成 |
+| `SettingsReconciliation` | `settings_reconciliation` | 设定协调 |
 
 新增 prompt 模板时需要：(1) 在 `PromptsConfig` 添加字段，(2) 在 `DefaultPrompts` 添加默认值，(3) 在 `applyDefaults` 添加 fallback。
 
@@ -205,7 +228,7 @@ planted → progressing → resolved
 
 `static/index.html` 是单文件前端，包含 HTML + CSS + vanilla JS。
 
-- **页面**：`config`（配置）、`outline`（大纲）、`continue`（续写）、`writing`（写作）
+- **页面**：`config`（配置）、`outline`（大纲，含导入功能）、`writing`（写作）
 - **导航**：`<nav>` 中 `<a data-page="xxx">` + hash 路由
 - **SSE**：`EventSource` 连接 `/api/events`，监听各事件类型
 - **全局对象**：`App` 包含所有状态和方法

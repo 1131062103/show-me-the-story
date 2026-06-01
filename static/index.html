@@ -43,7 +43,8 @@ main.active{display:block}
 .btn-danger:hover:not(:disabled){background:#e53935}
 .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
 .btn-outline:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
-.btn-group{display:flex;gap:8px;margin-top:12px}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-group{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
 .outline-table{width:100%;border-collapse:collapse;font-size:13px}
 .outline-table th{text-align:left;padding:8px;color:var(--text2);border-bottom:1px solid var(--border);font-weight:500}
 .outline-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:top}
@@ -55,6 +56,7 @@ main.active{display:block}
 .chapter-list li .status{font-size:16px;width:24px;text-align:center}
 .chapter-list li .num{color:var(--text2);width:30px}
 .chapter-list li .title{flex:1}
+.chapter-list li .actions{display:flex;gap:4px}
 .chapter-viewer{display:grid;grid-template-columns:280px 1fr;gap:16px;min-height:500px}
 .chapter-content{background:var(--bg3);border-radius:6px;padding:16px;font-size:14px;line-height:1.8;white-space:pre-wrap;max-height:600px;overflow-y:auto}
 .chapter-summary{background:var(--bg3);border-radius:6px;padding:12px;font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6}
@@ -82,6 +84,12 @@ main.active{display:block}
 @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
 .spinning{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+.inline-edit-row td{background:var(--bg3)}
+.inline-edit-row .edit-form{display:flex;flex-direction:column;gap:8px}
+.inline-edit-row .edit-form input,.inline-edit-row .edit-form textarea{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 8px;color:var(--text);font-size:12px;font-family:inherit}
+.inline-edit-row .edit-form textarea{min-height:60px;resize:vertical}
+.import-section{margin-top:16px;border-top:1px solid var(--border);padding-top:16px}
+.import-section textarea{min-height:150px}
 </style>
 </head>
 <body>
@@ -94,7 +102,6 @@ main.active{display:block}
 <nav>
 <a data-page="config" class="active">配置</a>
 <a data-page="outline">大纲</a>
-<a data-page="continue">续写</a>
 <a data-page="writing">写作</a>
 <div class="spacer"></div>
 <div id="taskIndicator" class="task-indicator">⏳ AI 思考中...</div>
@@ -129,7 +136,7 @@ main.active{display:block}
 </div>
 <div class="panel">
 <h2>故事配置</h2>
-<div id="configReadonlyNotice" style="display:none;padding:8px 12px;margin-bottom:12px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;font-size:12px;color:var(--orange)">已有大纲，故事配置不可修改。如需修改，请先删除大纲。</div>
+<div id="configReconcileNotice" style="display:none;padding:8px 12px;margin-bottom:12px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;font-size:12px;color:var(--orange)">已有已确认章节，保存配置后将自动由 AI 协调设定与已有内容的兼容性。</div>
 <div class="form-row">
 <div class="form-group">
 <label>故事类型</label>
@@ -164,7 +171,7 @@ main.active{display:block}
 </div>
 <div class="form-group">
 <label>核心写作要求</label>
-<textarea id="cfgCoreRequirements" placeholder="其他核心写作要求..."></textarea>
+<textarea id="cfgCoreRequirements" placeholder="可包含：故事主线走向、核心冲突、关键转折点、结局方向等骨架设计，以及其他写作约束（如叙事视角、节奏要求、禁止元素等）..."></textarea>
 </div>
 <div class="btn-group">
 <button class="btn btn-primary" onclick="saveStoryConfig()">保存故事配置</button>
@@ -177,53 +184,22 @@ main.active{display:block}
 <h2>大纲生成</h2>
 <div id="outlineEmpty" class="empty-state">
 <div class="icon">📝</div>
-<p>尚未生成大纲。点击下方按钮开始生成。</p>
+<p>尚未生成大纲。点击下方按钮开始生成，或导入已有内容。</p>
 <div class="btn-group" style="justify-content:center;margin-top:16px">
 <button class="btn btn-primary" id="btnGenOutline" onclick="generateOutline()">生成大纲</button>
-<button class="btn btn-outline" onclick="location.hash='#continue'">从已有内容续写</button>
+<button class="btn btn-outline" id="btnShowImport" onclick="showImportSection()">导入已有内容</button>
 </div>
 </div>
-<div id="outlineContent" style="display:none">
-<h3>📖 <span id="outlineTitle"></span></h3>
-<div class="form-group">
-<label>核心写作提示词</label>
-<div id="outlineCorePrompt" class="chapter-summary"></div>
-</div>
-<div class="form-group">
-<label>核心写作要求</label>
-<div id="outlineCoreReqs" class="chapter-summary"></div>
-</div>
-<h3>章节大纲</h3>
-<table class="outline-table">
-<thead><tr><th>#</th><th>标题</th><th>大纲</th><th>状态</th></tr></thead>
-<tbody id="outlineTableBody"></tbody>
-</table>
-<div class="btn-group">
-<button class="btn btn-success" id="btnConfirmOutline" onclick="confirmOutline()">确认大纲</button>
-<button class="btn btn-primary" id="btnGenContinuation" onclick="generateContinuationOutline()" style="display:none">生成后续大纲</button>
-<button class="btn btn-outline" id="btnReviseOutline" onclick="reviseOutline()">修订大纲</button>
-<button class="btn btn-danger" id="btnDeleteOutline" onclick="deleteOutline()">删除大纲</button>
-</div>
-<div id="outlineFeedbackRow" class="feedback-row" style="display:none">
-<input id="outlineFeedback" type="text" placeholder="输入修改意见..." onkeydown="if(event.key==='Enter')submitOutlineRevise()">
-<button class="btn btn-primary" onclick="submitOutlineRevise()">提交修订</button>
-</div>
-</div>
-</div>
-</main>
-
-<main id="page-continue">
-<div class="panel">
-<h2>续写 - 分析已有内容</h2>
-<div id="continueImport">
+<div id="importSection" style="display:none">
+<div class="import-section">
+<h3>导入已有内容</h3>
 <div class="form-group">
 <label>粘贴已有章节内容</label>
 <textarea id="continueContent" style="min-height:200px" placeholder="将已有小说文本粘贴到这里..."></textarea>
 </div>
-<div class="form-row">
-<div class="form-group" style="display:flex;align-items:flex-end">
+<div class="btn-group">
 <button class="btn btn-primary" id="btnAnalyze" onclick="importContent()">分析内容</button>
-</div>
+<button class="btn btn-outline" onclick="hideImportSection()">取消</button>
 </div>
 </div>
 </div>
@@ -265,8 +241,35 @@ main.active{display:block}
 </table>
 </div>
 <div class="btn-group">
-<button class="btn btn-success" onclick="confirmContinue()">确认续写</button>
+<button class="btn btn-success" onclick="confirmContinue()">确认导入</button>
 <button class="btn btn-outline" onclick="resetContinue()">重新分析</button>
+</div>
+</div>
+<div id="outlineContent" style="display:none">
+<h3>📖 <span id="outlineTitle"></span></h3>
+<div class="form-group">
+<label>核心写作提示词</label>
+<div id="outlineCorePrompt" class="chapter-summary"></div>
+</div>
+<div class="form-group">
+<label>核心写作要求</label>
+<div id="outlineCoreReqs" class="chapter-summary"></div>
+</div>
+<h3>章节大纲</h3>
+<table class="outline-table">
+<thead><tr><th>#</th><th>标题</th><th>大纲</th><th>状态</th><th>操作</th></tr></thead>
+<tbody id="outlineTableBody"></tbody>
+</table>
+<div class="btn-group">
+<button class="btn btn-success" id="btnConfirmOutline" onclick="confirmOutline()">确认大纲</button>
+<button class="btn btn-primary" id="btnGenContinuation" onclick="generateContinuationOutline()" style="display:none">生成后续大纲</button>
+<button class="btn btn-outline" id="btnReviseOutline" onclick="reviseOutline()">修订大纲</button>
+<button class="btn btn-danger" id="btnDeleteOutline" onclick="deleteOutline()">删除大纲</button>
+</div>
+<div id="outlineFeedbackRow" class="feedback-row" style="display:none">
+<input id="outlineFeedback" type="text" placeholder="输入修改意见..." onkeydown="if(event.key==='Enter')submitOutlineRevise()">
+<button class="btn btn-primary" onclick="submitOutlineRevise()">提交修订</button>
+</div>
 </div>
 </div>
 </main>
@@ -298,6 +301,7 @@ main.active{display:block}
 <button class="btn btn-success" id="btnConfirmChapter" onclick="confirmChapter()">确认本章</button>
 <button class="btn btn-outline" id="btnReviseChapter" onclick="showChapterFeedback()">修改本章</button>
 <button class="btn btn-danger" id="btnDeleteChapter" onclick="deleteChapter()">删除本章</button>
+<button class="btn btn-danger btn-sm" id="btnDeleteFromHere" onclick="deleteChaptersFrom()">从此章删除到末尾</button>
 </div>
 <div id="chapterFeedbackRow" class="feedback-row" style="display:none">
 <input id="chapterFeedback" type="text" placeholder="输入修改意见..." onkeydown="if(event.key==='Enter')submitChapterRevise()">
@@ -331,6 +335,7 @@ const App={
   streamingContent:'',
   streamingChapterIdx:-1,
   continueAnalysis:null,
+  editingChapterNum:-1,
   init(){
     this.connectSSE();
     this.loadAPIConfig();
@@ -377,6 +382,12 @@ const App={
     this.eventSource.addEventListener('continue_analysis',e=>{
       const d=JSON.parse(e.data);
       this.showContinueResult(d);
+    });
+    this.eventSource.addEventListener('settings_reconciled',e=>{
+      const d=JSON.parse(e.data);
+      this.loadConfig();
+      this.loadProgress();
+      this.toast('设定协调完成：'+(d.explanation||''),'success');
     });
     this.eventSource.onerror=()=>{
       setTimeout(()=>this.connectSSE(),3000);
@@ -504,8 +515,16 @@ const App={
     };
     try{
       await this.api('PUT','/api/config',cfg);
-      this.toast('故事配置已保存','success');
       this.config=cfg;
+      const hasAccepted=this.progress&&this.progress.chapters&&this.progress.chapters.some(c=>c.status==='accepted');
+      if(hasAccepted){
+        this.toast('设定已保存，正在自动协调已有内容...','info');
+        try{
+          await this.api('POST','/api/settings/reconcile',cfg.story);
+        }catch(e){this.toast('协调请求失败: '+e.message,'error')}
+      }else{
+        this.toast('故事配置已保存','success');
+      }
     }catch(e){this.toast(e.message,'error')}
   },
   async loadProgress(){
@@ -521,24 +540,21 @@ const App={
     const phaseNames={outline:'大纲阶段',writing:'写作阶段'};
     badge.textContent=phaseNames[p.phase]||p.phase;
     badge.classList.add('active');
-    this.updateConfigReadonly(p);
+    this.updateConfigNotice(p);
     this.renderOutline(p);
     this.renderWriting(p);
   },
-  updateConfigReadonly(p){
-    const hasOutline=p.chapters&&p.chapters.length>0;
-    const notice=document.getElementById('configReadonlyNotice');
-    notice.style.display=hasOutline?'block':'none';
-    const fields=['cfgStoryType','cfgStoryTitle','cfgChapterCount','cfgTargetWords','cfgWritingStyle','cfgCharacterSetting','cfgWorldSetting','cfgCoreRequirements'];
-    fields.forEach(id=>{
-      const el=document.getElementById(id);
-      if(el)el.readOnly=hasOutline;
-    });
+  updateConfigNotice(p){
+    const hasAccepted=p.chapters&&p.chapters.some(c=>c.status==='accepted');
+    const notice=document.getElementById('configReconcileNotice');
+    notice.style.display=hasAccepted?'block':'none';
   },
   renderOutline(p){
     const hasOutline=p.chapters&&p.chapters.length>0;
-    document.getElementById('outlineEmpty').style.display=hasOutline?'none':'block';
-    document.getElementById('outlineContent').style.display=hasOutline?'block':'none';
+    const importVisible=document.getElementById('importSection').style.display!=='none';
+    const resultVisible=document.getElementById('continueResult').style.display!=='none';
+    document.getElementById('outlineEmpty').style.display=(hasOutline||importVisible||resultVisible)?'none':'block';
+    document.getElementById('outlineContent').style.display=(hasOutline&&!resultVisible)?'block':'none';
     document.getElementById('btnGenOutline').disabled=hasOutline||this.taskRunning;
     if(!hasOutline)return;
     document.getElementById('outlineTitle').textContent=p.title||'';
@@ -548,8 +564,16 @@ const App={
     tbody.innerHTML='';
     const statusIcons={pending:'',writing:'⏳',review:'👀',accepted:'✅'};
     p.chapters.forEach(ch=>{
+      const isEditing=this.editingChapterNum===ch.num;
       const tr=document.createElement('tr');
-      tr.innerHTML=`<td>${ch.num}</td><td>${this.escHtml(ch.title)}</td><td>${this.escHtml(ch.outline)}</td><td>${statusIcons[ch.status]||''}</td>`;
+      if(isEditing){
+        tr.className='inline-edit-row';
+        tr.innerHTML=`<td>${ch.num}</td><td colspan="4"><div class="edit-form"><input id="editTitle_${ch.num}" type="text" value="${this.escHtml(ch.title)}" placeholder="章节标题"><textarea id="editOutline_${ch.num}" placeholder="章节大纲">${this.escHtml(ch.outline)}</textarea><div class="btn-group"><button class="btn btn-sm btn-success" onclick="saveChapterOutline(${ch.num})">保存</button><button class="btn btn-sm btn-outline" onclick="cancelEditOutline()">取消</button></div></div></td>`;
+      }else{
+        const canEdit=ch.status==='pending';
+        const editBtn=canEdit?`<button class="btn btn-sm btn-outline" onclick="editChapterOutline(${ch.num})">✏️</button>`:'';
+        tr.innerHTML=`<td>${ch.num}</td><td>${this.escHtml(ch.title)}</td><td>${this.escHtml(ch.outline)}</td><td>${statusIcons[ch.status]||''}</td><td>${editBtn}</td>`;
+      }
       tbody.appendChild(tr);
     });
     const inOutline=p.phase==='outline';
@@ -610,22 +634,26 @@ const App={
     const isLast=this.selectedChapter===p.chapters.length-1;
     const delBtn=document.getElementById('btnDeleteChapter');
     delBtn.style.display=(isLast&&ch.status!=='writing'&&ch.status!=='pending')?'inline-flex':'none';
+    const delFromBtn=document.getElementById('btnDeleteFromHere');
+    const noWritingAfter=p.chapters.slice(this.selectedChapter).every(c=>c.status!=='writing');
+    delFromBtn.style.display=(ch.status!=='writing'&&this.selectedChapter<p.chapters.length-1&&noWritingAfter)?'inline-flex':'none';
+    delFromBtn.disabled=this.taskRunning;
     genBtn.disabled=this.taskRunning;
     confBtn.disabled=this.taskRunning;
     revBtn.disabled=this.taskRunning;
     delBtn.disabled=this.taskRunning;
   },
-  async generateOutline(){
-    try{
-      await this.api('POST','/api/outline/generate');
-      this.toast('大纲生成中...','info');
-    }catch(e){this.toast(e.message,'error')}
+  showImportSection(){
+    document.getElementById('outlineEmpty').style.display='none';
+    document.getElementById('importSection').style.display='block';
+    document.getElementById('continueResult').style.display='none';
   },
-  async generateContinuationOutline(){
-    try{
-      await this.api('POST','/api/outline/generate-continuation',{chapter_count:5});
-      this.toast('续写大纲生成中...','info');
-    }catch(e){this.toast(e.message,'error')}
+  hideImportSection(){
+    document.getElementById('importSection').style.display='none';
+    document.getElementById('continueResult').style.display='none';
+    const hasOutline=this.progress&&this.progress.chapters&&this.progress.chapters.length>0;
+    document.getElementById('outlineEmpty').style.display=hasOutline?'none':'block';
+    document.getElementById('outlineContent').style.display=hasOutline?'block':'none';
   },
   async importContent(){
     const content=document.getElementById('continueContent').value.trim();
@@ -637,8 +665,9 @@ const App={
   },
   showContinueResult(d){
     this.continueAnalysis=d;
-    document.getElementById('continueImport').style.display='none';
+    document.getElementById('importSection').style.display='none';
     document.getElementById('continueResult').style.display='block';
+    document.getElementById('outlineEmpty').style.display='none';
     document.getElementById('caTitle').value=d.title||'';
     document.getElementById('caWritingStyle').value=d.writing_style||'';
     document.getElementById('caCharacterSetting').value=d.character_setting||'';
@@ -664,19 +693,37 @@ const App={
     d.core_requirements=document.getElementById('caCoreRequirements').value;
     try{
       await this.api('POST','/api/continue/confirm',d);
-      this.toast('续写导入成功','success');
+      this.toast('导入成功','success');
       this.continueAnalysis=null;
-      document.getElementById('continueImport').style.display='';
+      document.getElementById('importSection').style.display='none';
       document.getElementById('continueResult').style.display='none';
       document.getElementById('continueContent').value='';
-      location.hash='#outline';
       await this.loadProgress();
     }catch(e){this.toast(e.message,'error')}
   },
   resetContinue(){
     this.continueAnalysis=null;
-    document.getElementById('continueImport').style.display='';
     document.getElementById('continueResult').style.display='none';
+    document.getElementById('importSection').style.display='block';
+  },
+  editChapterOutline(num){
+    this.editingChapterNum=num;
+    this.renderProgress();
+  },
+  cancelEditOutline(){
+    this.editingChapterNum=-1;
+    this.renderProgress();
+  },
+  async saveChapterOutline(num){
+    const title=document.getElementById('editTitle_'+num).value.trim();
+    const outline=document.getElementById('editOutline_'+num).value.trim();
+    if(!title){this.toast('标题不能为空','error');return}
+    try{
+      await this.api('PUT','/api/outline/'+num,{title,outline});
+      this.editingChapterNum=-1;
+      this.toast('大纲已更新','success');
+      await this.loadProgress();
+    }catch(e){this.toast(e.message,'error')}
   },
   async confirmOutline(){
     try{
@@ -697,6 +744,18 @@ const App={
       document.getElementById('outlineFeedback').value='';
       document.getElementById('outlineFeedbackRow').style.display='none';
       this.toast('大纲修订中...','info');
+    }catch(e){this.toast(e.message,'error')}
+  },
+  async generateOutline(){
+    try{
+      await this.api('POST','/api/outline/generate');
+      this.toast('大纲生成中...','info');
+    }catch(e){this.toast(e.message,'error')}
+  },
+  async generateContinuationOutline(){
+    try{
+      await this.api('POST','/api/outline/generate-continuation',{chapter_count:5});
+      this.toast('续写大纲生成中...','info');
     }catch(e){this.toast(e.message,'error')}
   },
   async generateChapter(){
@@ -739,6 +798,18 @@ const App={
       this.renderProgress();
     }catch(e){this.toast(e.message,'error')}
   },
+  async deleteChaptersFrom(){
+    if(!this.progress||!this.progress.chapters)return;
+    const ch=this.progress.chapters[this.selectedChapter];
+    if(!ch)return;
+    if(!confirm(`确认从第 ${ch.num} 章开始删除到末尾？此操作不可撤销。`))return;
+    try{
+      await this.api('DELETE','/api/chapters/from/'+ch.num);
+      this.toast('章节已删除','success');
+      this.selectedChapter=-1;
+      await this.loadProgress();
+    }catch(e){this.toast(e.message,'error')}
+  },
   async deleteOutline(){
     try{
       await this.api('DELETE','/api/outline');
@@ -756,6 +827,11 @@ function generateContinuationOutline(){App.generateContinuationOutline()}
 function importContent(){App.importContent()}
 function confirmContinue(){App.confirmContinue()}
 function resetContinue(){App.resetContinue()}
+function showImportSection(){App.showImportSection()}
+function hideImportSection(){App.hideImportSection()}
+function editChapterOutline(num){App.editChapterOutline(num)}
+function cancelEditOutline(){App.cancelEditOutline()}
+function saveChapterOutline(num){App.saveChapterOutline(num)}
 function confirmOutline(){App.confirmOutline()}
 function reviseOutline(){App.reviseOutline()}
 function submitOutlineRevise(){App.submitOutlineRevise()}
@@ -764,6 +840,7 @@ function confirmChapter(){App.confirmChapter()}
 function showChapterFeedback(){App.showChapterFeedback()}
 function submitChapterRevise(){App.submitChapterRevise()}
 function deleteChapter(){App.deleteChapter()}
+function deleteChaptersFrom(){App.deleteChaptersFrom()}
 function deleteOutline(){App.deleteOutline()}
 
 function toggleLog(){

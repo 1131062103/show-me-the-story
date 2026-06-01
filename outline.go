@@ -79,6 +79,12 @@ func reviseOutline(apiCfg *APIConfig, cfg *Config, state *Progress, userFeedback
 		return fmt.Errorf("解析修订大纲JSON失败: %w\n原始响应: %s", err, rawResp)
 	}
 
+	applyOutlineRevision(resp, state)
+
+	return nil
+}
+
+func applyOutlineRevision(resp OutlineResponse, state *Progress) {
 	lockedMap := make(map[int]bool)
 	for _, ch := range state.Chapters {
 		if ch.Status == StatusAccepted {
@@ -104,8 +110,6 @@ func reviseOutline(apiCfg *APIConfig, cfg *Config, state *Progress, userFeedback
 	if resp.CoreRequirements != "" {
 		state.CoreRequirements = resp.CoreRequirements
 	}
-
-	return nil
 }
 
 func truncate(s string, maxLen int) string {
@@ -186,4 +190,23 @@ func ConfirmOutlineAction(state *Progress, progressPath string) error {
 
 	state.Phase = "writing"
 	return SaveProgress(progressPath, state)
+}
+
+func EditChapterOutline(state *Progress, chapterNum int, title, outline string) error {
+	idx := -1
+	for i, ch := range state.Chapters {
+		if ch.Num == chapterNum {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return fmt.Errorf("章节 %d 不存在", chapterNum)
+	}
+	if state.Chapters[idx].Status != StatusPending {
+		return fmt.Errorf("只能编辑待定（pending）状态的章节大纲")
+	}
+	state.Chapters[idx].Title = title
+	state.Chapters[idx].Outline = outline
+	return nil
 }

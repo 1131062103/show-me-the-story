@@ -30,12 +30,16 @@ func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, cfgPath s
 	mux.HandleFunc("POST /api/outline/confirm", h.PostOutlineConfirm)
 	mux.HandleFunc("POST /api/outline/revise", h.PostOutlineRevise)
 	mux.HandleFunc("POST /api/outline/generate-continuation", h.PostOutlineGenerateContinuation)
+	mux.HandleFunc("PUT /api/outline/{num}", h.PutChapterOutline)
 
 	mux.HandleFunc("POST /api/chapter/generate", h.PostChapterGenerate)
 	mux.HandleFunc("POST /api/chapter/confirm", h.PostChapterConfirm)
 	mux.HandleFunc("POST /api/chapter/revise", h.PostChapterRevise)
 	mux.HandleFunc("DELETE /api/chapter", h.DeleteChapter)
+	mux.HandleFunc("DELETE /api/chapters/from/{num}", h.DeleteChaptersFrom)
 	mux.HandleFunc("DELETE /api/outline", h.DeleteOutline)
+
+	mux.HandleFunc("POST /api/settings/reconcile", h.PostSettingsReconcile)
 
 	mux.HandleFunc("GET /api/foreshadows", h.GetForeshadows)
 	mux.HandleFunc("POST /api/foreshadows/suggest", h.PostForeshadowsSuggest)

@@ -113,6 +113,10 @@ func (lb *LogBroadcaster) ContinueAnalysisResult(data interface{}) {
 	lb.Emit("continue_analysis", data)
 }
 
+func (lb *LogBroadcaster) SettingsReconciled(data interface{}) {
+	lb.Emit("settings_reconciled", data)
+}
+
 func (lb *LogBroadcaster) Close() {
 	lb.mu.Lock()
 	lb.closed = true

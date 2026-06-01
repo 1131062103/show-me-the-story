@@ -400,6 +400,139 @@ func (h *Handlers) DeleteOutline(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, h.state)
 }
 
+func (h *Handlers) PutChapterOutline(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeError(w, http.StatusConflict, "有任务正在运行，请等待完成")
+		return
+	}
+
+	numStr := r.PathValue("num")
+	var num int
+	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
+		h.writeError(w, http.StatusBadRequest, "无效的章节编号")
+		return
+	}
+
+	var body struct {
+		Title   string `json:"title"`
+		Outline string `json:"outline"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeError(w, http.StatusBadRequest, "无效的JSON: "+err.Error())
+		return
+	}
+
+	if err := EditChapterOutline(h.state, num, body.Title, body.Outline); err != nil {
+		h.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := SaveProgress(h.progressPath, h.state); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "保存进度失败: "+err.Error())
+		return
+	}
+
+	h.logger.Success(fmt.Sprintf("第 %d 章大纲已更新。", num))
+	h.writeJSON(w, http.StatusOK, h.state)
+}
+
+func (h *Handlers) PostSettingsReconcile(w http.ResponseWriter, r *http.Request) {
+	if !h.tryStartTask() {
+		h.writeError(w, http.StatusConflict, "有任务正在运行，请等待完成")
+		return
+	}
+
+	var body StoryConfig
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.endTask()
+		h.writeError(w, http.StatusBadRequest, "无效的JSON: "+err.Error())
+		return
+	}
+
+	go func() {
+		h.logger.TaskStart("settings_reconciliation")
+
+		h.logger.Info("正在协调新设定与已有内容...")
+		err := ReconcileSettingsAction(h.apiCfg, h.cfg, h.state, body, h.progressPath, h.cfgPath, h.logger)
+
+		if err != nil {
+			h.endTask()
+			h.logger.Error(fmt.Sprintf("设定协调失败: %v", err))
+			h.logger.TaskEnd("settings_reconciliation", false)
+			return
+		}
+
+		h.endTask()
+		h.logger.Success("设定协调完成！")
+		h.logger.TaskEnd("settings_reconciliation", true)
+		h.broadcastProgress()
+	}()
+
+	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+func (h *Handlers) DeleteChaptersFrom(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeError(w, http.StatusConflict, "有任务正在运行，无法删除章节")
+		return
+	}
+
+	numStr := r.PathValue("num")
+	var num int
+	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
+		h.writeError(w, http.StatusBadRequest, "无效的章节编号")
+		return
+	}
+
+	startIdx := -1
+	for i, ch := range h.state.Chapters {
+		if ch.Num == num {
+			startIdx = i
+			break
+		}
+	}
+	if startIdx == -1 {
+		h.writeError(w, http.StatusNotFound, fmt.Sprintf("章节 %d 不存在", num))
+		return
+	}
+
+	for i := startIdx; i < len(h.state.Chapters); i++ {
+		if h.state.Chapters[i].Status == StatusWriting {
+			h.writeError(w, http.StatusConflict, "删除范围内有正在写作中的章节，无法删除")
+			return
+		}
+	}
+
+	deletedCount := len(h.state.Chapters) - startIdx
+
+	for i := startIdx; i < len(h.state.Chapters); i++ {
+		mdFile := fmt.Sprintf("Chapter_%02d.md", h.state.Chapters[i].Num)
+		if err := deleteFile(mdFile); err != nil {
+			h.logger.Warn(fmt.Sprintf("删除文件 %s 失败: %v", mdFile, err))
+		}
+	}
+
+	h.state.Chapters = h.state.Chapters[:startIdx]
+
+	if h.state.CurrentChapterIndex > len(h.state.Chapters) {
+		h.state.CurrentChapterIndex = len(h.state.Chapters)
+	}
+
+	if len(h.state.Chapters) == 0 {
+		h.state.Phase = "outline"
+		h.state.CurrentChapterIndex = 0
+		h.state.StoryConfigSnapshot = nil
+	}
+
+	if err := SaveProgress(h.progressPath, h.state); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "保存进度失败: "+err.Error())
+		return
+	}
+
+	h.logger.Success(fmt.Sprintf("已从第 %d 章删除到末尾，共删除 %d 章。", num, deletedCount))
+	h.writeJSON(w, http.StatusOK, h.state)
+}
+
 func (h *Handlers) broadcastProgress() {
 	accepted := 0
 	for _, ch := range h.state.Chapters {
