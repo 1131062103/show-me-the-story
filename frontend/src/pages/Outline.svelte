@@ -6,7 +6,7 @@
   let showFeedback = false;
   let feedbackText = '';
   let importContent = '';
-  let caTitle = '', caWritingStyle = '', caCharSetting = '', caWorldSetting = '', caCorePrompt = '', caCoreReqs = '';
+  let caTitle = '', caWritingStyle = '', caCorePrompt = '', caStorySynopsis = '';
   let editTitle = '', editOutline = '';
 
   $: p = $progress;
@@ -21,10 +21,8 @@
     const d = $continueAnalysis;
     caTitle = d.title || '';
     caWritingStyle = d.writing_style || '';
-    caCharSetting = d.character_setting || '';
-    caWorldSetting = d.world_setting || '';
     caCorePrompt = d.core_prompt || '';
-    caCoreReqs = d.core_requirements || '';
+    caStorySynopsis = d.story_synopsis || '';
   }
 
   const statusIcons = { pending: '', writing: '⏳', review: '👀', accepted: '✅' };
@@ -39,7 +37,7 @@
   }
 
   async function doConfirmContinue() {
-    const d = { ...$continueAnalysis, title: caTitle, writing_style: caWritingStyle, character_setting: caCharSetting, world_setting: caWorldSetting, core_prompt: caCorePrompt, core_requirements: caCoreReqs };
+    const d = { ...$continueAnalysis, title: caTitle, writing_style: caWritingStyle, core_prompt: caCorePrompt, story_synopsis: caStorySynopsis };
     try {
       await api('POST', '/api/continue/confirm', d);
       addToast('导入成功', 'success');
@@ -125,10 +123,8 @@
         <div class="grid grid-cols-2 gap-2">
           <div class="form-control"><label class="label py-0"><span class="label-text text-xs">小说标题</span></label><input type="text" class="input input-bordered input-sm" bind:value={caTitle} /></div>
           <div class="form-control"><label class="label py-0"><span class="label-text text-xs">写作风格</span></label><input type="text" class="input input-bordered input-sm" bind:value={caWritingStyle} /></div>
-          <div class="form-control"><label class="label py-0"><span class="label-text text-xs">角色设定</span></label><textarea class="textarea textarea-bordered textarea-sm h-12" bind:value={caCharSetting}></textarea></div>
-          <div class="form-control"><label class="label py-0"><span class="label-text text-xs">世界观设定</span></label><textarea class="textarea textarea-bordered textarea-sm h-12" bind:value={caWorldSetting}></textarea></div>
           <div class="form-control"><label class="label py-0"><span class="label-text text-xs">核心写作提示词</span></label><textarea class="textarea textarea-bordered textarea-sm h-12" bind:value={caCorePrompt}></textarea></div>
-          <div class="form-control"><label class="label py-0"><span class="label-text text-xs">核心写作要求</span></label><textarea class="textarea textarea-bordered textarea-sm h-12" bind:value={caCoreReqs}></textarea></div>
+          <div class="form-control"><label class="label py-0"><span class="label-text text-xs">故事梗概</span></label><textarea class="textarea textarea-bordered textarea-sm h-12" bind:value={caStorySynopsis}></textarea></div>
         </div>
         {#if $continueAnalysis.chapters?.length > 0}
           <h4 class="text-sm font-semibold mt-3">已有章节大纲</h4>
@@ -158,8 +154,8 @@
         {#if p.core_prompt}
           <div class="form-control"><label class="label py-1"><span class="label-text text-xs">核心写作提示词</span></label><div class="bg-base-300 rounded p-2 text-xs">{p.core_prompt}</div></div>
         {/if}
-        {#if p.core_requirements}
-          <div class="form-control"><label class="label py-1"><span class="label-text text-xs">核心写作要求</span></label><div class="bg-base-300 rounded p-2 text-xs">{p.core_requirements}</div></div>
+        {#if p.story_synopsis}
+          <div class="form-control"><label class="label py-1"><span class="label-text text-xs">故事梗概</span></label><div class="bg-base-300 rounded p-2 text-xs">{p.story_synopsis}</div></div>
         {/if}
         <h4 class="text-sm font-semibold mt-2">章节大纲</h4>
         <div class="overflow-x-auto">
