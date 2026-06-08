@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -35,7 +36,7 @@ type ToolCall struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
-func RunAgentLoop(ctx *AgentContext, userMessage string, history []AgentStep, maxSteps int) (string, []AgentStep, error) {
+func RunAgentLoop(goCtx context.Context, ctx *AgentContext, userMessage string, history []AgentStep, maxSteps int) (string, []AgentStep, error) {
 	tools := getBuiltinTools()
 	toolDesc := buildToolDescriptions(tools)
 
@@ -60,8 +61,12 @@ func RunAgentLoop(ctx *AgentContext, userMessage string, history []AgentStep, ma
 	messages = append(messages, Message{Role: "user", Content: userMessage})
 
 	for step := 0; step < maxSteps; step++ {
+		if goCtx.Err() != nil {
+			return "", history, fmt.Errorf("任务已取消")
+		}
+
 		fullResp := ""
-		err := callAgentAPI(ctx.APICfg, messages, func(chunk string) {
+		err := callAgentAPI(goCtx, ctx.APICfg, messages, func(chunk string) {
 			fullResp += chunk
 		})
 		if err != nil {
@@ -99,10 +104,10 @@ func RunAgentLoop(ctx *AgentContext, userMessage string, history []AgentStep, ma
 	return "已达到最大工具调用步骤限制。", history, nil
 }
 
-func callAgentAPI(apiCfg *APIConfig, messages []Message, onChunk func(string)) error {
-	_, err := CallAPIStream(apiCfg, messages[0].Content, formatMessages(messages[1:]), onChunk)
+func callAgentAPI(ctx context.Context, apiCfg *APIConfig, messages []Message, onChunk func(string)) error {
+	_, err := CallAPIStream(ctx, apiCfg, messages[0].Content, formatMessages(messages[1:]), onChunk)
 	if err != nil {
-		result, err2 := CallAPI(apiCfg, messages[0].Content, formatMessages(messages[1:]))
+		result, err2 := CallAPI(ctx, apiCfg, messages[0].Content, formatMessages(messages[1:]))
 		if err2 != nil {
 			return err
 		}

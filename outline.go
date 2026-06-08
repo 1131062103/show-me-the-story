@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -19,7 +20,7 @@ type OutlineChapter struct {
 	Outline string `json:"outline"`
 }
 
-func generateOutline(apiCfg *APIConfig, cfg *Config) (*OutlineResponse, error) {
+func generateOutline(ctx context.Context, apiCfg *APIConfig, cfg *Config) (*OutlineResponse, error) {
 	chapterCountStr := fmt.Sprintf("%d", cfg.Story.ChapterCount)
 	targetWordsStr := fmt.Sprintf("%d", cfg.Story.TargetWordsPerChapter)
 
@@ -35,7 +36,10 @@ func generateOutline(apiCfg *APIConfig, cfg *Config) (*OutlineResponse, error) {
 
 	systemPrompt := "你是一位专业的小说策划编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetry(apiCfg, systemPrompt, userPrompt)
+	rawResp := CallAPIWithRetry(ctx, apiCfg, systemPrompt, userPrompt)
+	if rawResp == "" {
+		return nil, fmt.Errorf("API 调用失败或被取消")
+	}
 
 	rawResp = cleanJSONResponse(rawResp)
 
@@ -47,7 +51,7 @@ func generateOutline(apiCfg *APIConfig, cfg *Config) (*OutlineResponse, error) {
 	return &resp, nil
 }
 
-func reviseOutline(apiCfg *APIConfig, cfg *Config, state *Progress, userFeedback string) error {
+func reviseOutline(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, userFeedback string) error {
 	lockedChapters := ""
 	for _, ch := range state.Chapters {
 		if ch.Status == StatusAccepted {
@@ -71,7 +75,10 @@ func reviseOutline(apiCfg *APIConfig, cfg *Config, state *Progress, userFeedback
 
 	systemPrompt := "你是一位小说策划编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。已锁定的章节内容不可修改。"
 
-	rawResp := CallAPIWithRetry(apiCfg, systemPrompt, userPrompt)
+	rawResp := CallAPIWithRetry(ctx, apiCfg, systemPrompt, userPrompt)
+	if rawResp == "" {
+		return fmt.Errorf("API 调用失败或被取消")
+	}
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp OutlineResponse
@@ -133,10 +140,10 @@ func cleanJSONResponse(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func GenerateOutlineAction(apiCfg *APIConfig, cfg *Config, state *Progress, progressPath string, logger *LogBroadcaster) error {
+func GenerateOutlineAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, progressPath string, logger *LogBroadcaster) error {
 	logger.StepInfo(1, 2, "正在调用 AI 生成大纲...")
 
-	outlineResp, err := generateOutline(apiCfg, cfg)
+	outlineResp, err := generateOutline(ctx, apiCfg, cfg)
 	if err != nil {
 		return fmt.Errorf("生成大纲失败: %w", err)
 	}
@@ -166,10 +173,10 @@ func GenerateOutlineAction(apiCfg *APIConfig, cfg *Config, state *Progress, prog
 	return nil
 }
 
-func ReviseOutlineAction(apiCfg *APIConfig, cfg *Config, state *Progress, progressPath, feedback string, logger *LogBroadcaster) error {
+func ReviseOutlineAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, progressPath, feedback string, logger *LogBroadcaster) error {
 	logger.StepInfo(1, 2, "正在根据意见修订大纲...")
 
-	if err := reviseOutline(apiCfg, cfg, state, feedback); err != nil {
+	if err := reviseOutline(ctx, apiCfg, cfg, state, feedback); err != nil {
 		return fmt.Errorf("修订大纲失败: %w", err)
 	}
 

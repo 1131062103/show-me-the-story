@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-//go:embed static
+//go:embed frontend/dist
 var staticFiles embed.FS
 
 func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, cfgPath string, state *Progress, progressPath string, settings *ProjectSettings, settingsPath string, skills []Skill, sessionsDir string, logger *LogBroadcaster, port string, projectDir string) {
@@ -41,6 +41,8 @@ func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, cfgPath s
 	mux.HandleFunc("DELETE /api/chapter", h.DeleteChapter)
 	mux.HandleFunc("DELETE /api/chapters/from/{num}", h.DeleteChaptersFrom)
 	mux.HandleFunc("DELETE /api/outline", h.DeleteOutline)
+
+	mux.HandleFunc("POST /api/task/stop", h.PostTaskStop)
 
 	mux.HandleFunc("POST /api/settings/reconcile", h.PostSettingsReconcile)
 	mux.HandleFunc("GET /api/settings", h.GetSettings)
@@ -83,7 +85,7 @@ func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, cfgPath s
 
 	mux.HandleFunc("GET /api/events", h.SSEHandler)
 
-	staticFS, err := fs.Sub(staticFiles, "static")
+	staticFS, err := fs.Sub(staticFiles, "frontend/dist")
 	if err != nil {
 		log.Fatalf("嵌入静态文件失败: %v", err)
 	}
@@ -93,7 +95,7 @@ func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, cfgPath s
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			data, err := staticFiles.ReadFile("static/index.html")
+			data, err := staticFiles.ReadFile("frontend/dist/index.html")
 			if err != nil {
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return

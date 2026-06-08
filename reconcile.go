@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 )
@@ -14,7 +15,7 @@ type ReconciliationResult struct {
 	Explanation      string `json:"explanation"`
 }
 
-func ReconcileSettingsAction(apiCfg *APIConfig, cfg *Config, state *Progress,
+func ReconcileSettingsAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress,
 	newSettings StoryConfig, progressPath string, cfgPath string, logger *LogBroadcaster) error {
 
 	logger.StepInfo(1, 3, "正在分析已有章节与新设定的兼容性...")
@@ -40,7 +41,10 @@ func ReconcileSettingsAction(apiCfg *APIConfig, cfg *Config, state *Progress,
 
 	systemPrompt := "你是一位专业的小说一致性审查编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetry(apiCfg, systemPrompt, userPrompt)
+	rawResp := CallAPIWithRetry(ctx, apiCfg, systemPrompt, userPrompt)
+	if rawResp == "" {
+		return fmt.Errorf("API 调用失败或被取消")
+	}
 	rawResp = cleanJSONResponse(rawResp)
 
 	var result ReconciliationResult
@@ -71,7 +75,7 @@ func ReconcileSettingsAction(apiCfg *APIConfig, cfg *Config, state *Progress,
 		logger.StepInfo(3, 3, "正在基于新设定重新生成待定章节大纲...")
 		origStory := cfg.Story
 		cfg.Story = adjustedStory
-		if err := regeneratePendingOutlines(apiCfg, cfg, state, logger); err != nil {
+		if err := regeneratePendingOutlines(ctx, apiCfg, cfg, state, logger); err != nil {
 			logger.Warn(fmt.Sprintf("待定章节大纲重新生成失败: %v（设定已更新）", err))
 		}
 		cfg.Story = origStory
@@ -114,7 +118,7 @@ func ReconcileSettingsAction(apiCfg *APIConfig, cfg *Config, state *Progress,
 	return nil
 }
 
-func regeneratePendingOutlines(apiCfg *APIConfig, cfg *Config, state *Progress, logger *LogBroadcaster) error {
+func regeneratePendingOutlines(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, logger *LogBroadcaster) error {
 	pendingChapters := ""
 	for _, ch := range state.Chapters {
 		if ch.Status == StatusPending {
@@ -143,7 +147,10 @@ func regeneratePendingOutlines(apiCfg *APIConfig, cfg *Config, state *Progress, 
 
 	systemPrompt := "你是一位小说策划编辑。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。已锁定的章节内容不可修改。"
 
-	rawResp := CallAPIWithRetry(apiCfg, systemPrompt, userPrompt)
+	rawResp := CallAPIWithRetry(ctx, apiCfg, systemPrompt, userPrompt)
+	if rawResp == "" {
+		return fmt.Errorf("API 调用失败或被取消")
+	}
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp OutlineResponse

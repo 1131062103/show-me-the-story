@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,7 +42,37 @@ func normalizeURL(base string) string {
 	return base + "/chat/completions"
 }
 
-func CallAPI(apiCfg *APIConfig, system, user string) (string, error) {
+func validateAPIConfig(apiCfg *APIConfig) error {
+	if strings.TrimSpace(apiCfg.BaseURL) == "" {
+		return fmt.Errorf("API Base URL 未配置")
+	}
+	if strings.TrimSpace(apiCfg.Model) == "" {
+		return fmt.Errorf("Model 未配置")
+	}
+	return nil
+}
+
+func isFatalAPIError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "dial tcp") ||
+		strings.Contains(msg, "lookup ") {
+		return true
+	}
+	if strings.Contains(msg, "状态码: 401") || strings.Contains(msg, "状态码: 404") {
+		return true
+	}
+	if strings.Contains(msg, "context canceled") {
+		return true
+	}
+	return false
+}
+
+func CallAPI(ctx context.Context, apiCfg *APIConfig, system, user string) (string, error) {
 	fullURL := normalizeURL(apiCfg.BaseURL)
 
 	reqBody := ChatRequest{
@@ -57,7 +88,7 @@ func CallAPI(apiCfg *APIConfig, system, user string) (string, error) {
 		return "", err
 	}
 
-	req, err := http.NewRequest("POST", fullURL, bytes.NewBuffer(bts))
+	req, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewBuffer(bts))
 	if err != nil {
 		return "", err
 	}
@@ -95,33 +126,55 @@ func CallAPI(apiCfg *APIConfig, system, user string) (string, error) {
 	return "", fmt.Errorf("接口未响应有效 Choices 文本")
 }
 
-func CallAPIWithRetry(apiCfg *APIConfig, system, user string) string {
+func CallAPIWithRetry(ctx context.Context, apiCfg *APIConfig, system, user string) string {
 	retryCount := 0
 	for {
-		result, err := CallAPI(apiCfg, system, user)
+		if ctx.Err() != nil {
+			return ""
+		}
+		result, err := CallAPI(ctx, apiCfg, system, user)
 		if err == nil && result != "" {
 			return result
+		}
+		if isFatalAPIError(err) {
+			fmt.Printf(" ❌ [致命错误] %v，不再重试\n", err)
+			return ""
 		}
 
 		retryCount++
 		waitTime := getWaitTime(retryCount)
 		fmt.Printf(" ⚠️ [错误] API调用失败: %v。第 %d 次重试，等待 %ds 后重试...\n", err, retryCount, waitTime)
-		time.Sleep(time.Duration(waitTime) * time.Second)
+		select {
+		case <-time.After(time.Duration(waitTime) * time.Second):
+		case <-ctx.Done():
+			return ""
+		}
 	}
 }
 
-func CallAPIWithRetryLog(apiCfg *APIConfig, system, user string, logger *LogBroadcaster) string {
+func CallAPIWithRetryLog(ctx context.Context, apiCfg *APIConfig, system, user string, logger *LogBroadcaster) string {
 	retryCount := 0
 	for {
-		result, err := CallAPI(apiCfg, system, user)
+		if ctx.Err() != nil {
+			return ""
+		}
+		result, err := CallAPI(ctx, apiCfg, system, user)
 		if err == nil && result != "" {
 			return result
+		}
+		if isFatalAPIError(err) {
+			logger.Error(fmt.Sprintf("致命错误: %v，不再重试", err))
+			return ""
 		}
 
 		retryCount++
 		waitTime := getWaitTime(retryCount)
 		logger.Warn(fmt.Sprintf("API调用失败: %v。第 %d 次重试，等待 %ds...", err, retryCount, waitTime))
-		time.Sleep(time.Duration(waitTime) * time.Second)
+		select {
+		case <-time.After(time.Duration(waitTime) * time.Second):
+		case <-ctx.Done():
+			return ""
+		}
 	}
 }
 
@@ -140,7 +193,7 @@ type streamDelta struct {
 	} `json:"choices"`
 }
 
-func CallAPIStream(apiCfg *APIConfig, system, user string, onChunk func(string)) (string, error) {
+func CallAPIStream(ctx context.Context, apiCfg *APIConfig, system, user string, onChunk func(string)) (string, error) {
 	fullURL := normalizeURL(apiCfg.BaseURL)
 
 	reqBody := ChatRequest{
@@ -157,7 +210,7 @@ func CallAPIStream(apiCfg *APIConfig, system, user string, onChunk func(string))
 		return "", err
 	}
 
-	req, err := http.NewRequest("POST", fullURL, bytes.NewBuffer(bts))
+	req, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewBuffer(bts))
 	if err != nil {
 		return "", err
 	}
@@ -184,6 +237,9 @@ func CallAPIStream(apiCfg *APIConfig, system, user string, onChunk func(string))
 	scanner := bufio.NewScanner(resp.Body)
 
 	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return fullContent.String(), ctx.Err()
+		}
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
 			continue
@@ -213,32 +269,54 @@ func CallAPIStream(apiCfg *APIConfig, system, user string, onChunk func(string))
 	return result, nil
 }
 
-func CallAPIStreamWithRetry(apiCfg *APIConfig, system, user string, onChunk func(string)) string {
+func CallAPIStreamWithRetry(ctx context.Context, apiCfg *APIConfig, system, user string, onChunk func(string)) string {
 	retryCount := 0
 	for {
-		result, err := CallAPIStream(apiCfg, system, user, onChunk)
+		if ctx.Err() != nil {
+			return ""
+		}
+		result, err := CallAPIStream(ctx, apiCfg, system, user, onChunk)
 		if err == nil && result != "" {
 			return result
+		}
+		if isFatalAPIError(err) {
+			fmt.Printf(" ❌ [致命错误] %v，不再重试\n", err)
+			return ""
 		}
 
 		retryCount++
 		waitTime := getWaitTime(retryCount)
 		fmt.Printf(" ⚠️ [错误] 流式API调用失败: %v。第 %d 次重试，等待 %ds 后重试...\n", err, retryCount, waitTime)
-		time.Sleep(time.Duration(waitTime) * time.Second)
+		select {
+		case <-time.After(time.Duration(waitTime) * time.Second):
+		case <-ctx.Done():
+			return ""
+		}
 	}
 }
 
-func CallAPIStreamWithRetryLog(apiCfg *APIConfig, system, user string, onChunk func(string), logger *LogBroadcaster) string {
+func CallAPIStreamWithRetryLog(ctx context.Context, apiCfg *APIConfig, system, user string, onChunk func(string), logger *LogBroadcaster) string {
 	retryCount := 0
 	for {
-		result, err := CallAPIStream(apiCfg, system, user, onChunk)
+		if ctx.Err() != nil {
+			return ""
+		}
+		result, err := CallAPIStream(ctx, apiCfg, system, user, onChunk)
 		if err == nil && result != "" {
 			return result
+		}
+		if isFatalAPIError(err) {
+			logger.Error(fmt.Sprintf("致命错误: %v，不再重试", err))
+			return ""
 		}
 
 		retryCount++
 		waitTime := getWaitTime(retryCount)
 		logger.Warn(fmt.Sprintf("流式API调用失败: %v。第 %d 次重试，等待 %ds...", err, retryCount, waitTime))
-		time.Sleep(time.Duration(waitTime) * time.Second)
+		select {
+		case <-time.After(time.Duration(waitTime) * time.Second):
+		case <-ctx.Done():
+			return ""
+		}
 	}
 }

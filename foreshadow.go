@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -28,7 +29,7 @@ type ForeshadowUpdateResponse struct {
 	Updates []ForeshadowUpdateItem `json:"updates"`
 }
 
-func SuggestForeshadows(apiCfg *APIConfig, cfg *Config, state *Progress, logger *LogBroadcaster) ([]ForeshadowSuggestion, error) {
+func SuggestForeshadows(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, logger *LogBroadcaster) ([]ForeshadowSuggestion, error) {
 	snapshot := state.StoryConfigSnapshot
 	if snapshot == nil {
 		snapshot = &cfg.Story
@@ -50,7 +51,10 @@ func SuggestForeshadows(apiCfg *APIConfig, cfg *Config, state *Progress, logger 
 
 	systemPrompt := "你是一位资深的小说叙事架构师。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetryLog(apiCfg, systemPrompt, userPrompt, logger)
+	rawResp := CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)
+	if rawResp == "" {
+		return nil, fmt.Errorf("API 调用失败或被取消")
+	}
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp ForeshadowPlanResponse
@@ -62,7 +66,7 @@ func SuggestForeshadows(apiCfg *APIConfig, cfg *Config, state *Progress, logger 
 	return resp.Foreshadows, nil
 }
 
-func UpdateForeshadows(apiCfg *APIConfig, cfg *Config, state *Progress, chapterIdx int, logger *LogBroadcaster) error {
+func UpdateForeshadows(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, chapterIdx int, logger *LogBroadcaster) error {
 	ch := state.Chapters[chapterIdx]
 
 	foreshadowsText := formatForeshadowsForPrompt(state.Foreshadows)
@@ -90,7 +94,10 @@ func UpdateForeshadows(apiCfg *APIConfig, cfg *Config, state *Progress, chapterI
 
 	systemPrompt := "你是一位严谨的小说伏笔追踪员。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetryLog(apiCfg, systemPrompt, userPrompt, logger)
+	rawResp := CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)
+	if rawResp == "" {
+		return fmt.Errorf("API 调用失败或被取消")
+	}
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp ForeshadowUpdateResponse

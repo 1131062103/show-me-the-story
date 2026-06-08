@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,6 +23,8 @@ type Handlers struct {
 	logger       *LogBroadcaster
 	taskMu       sync.Mutex
 	taskRunning  bool
+	taskCtx      context.Context
+	taskCancel   context.CancelFunc
 	projectDir   string
 
 	pendingContinueContent string
@@ -61,12 +64,17 @@ func (h *Handlers) tryStartTask() bool {
 		return false
 	}
 	h.taskRunning = true
+	h.taskCtx, h.taskCancel = context.WithCancel(context.Background())
 	return true
 }
 
 func (h *Handlers) endTask() {
 	h.taskMu.Lock()
 	h.taskRunning = false
+	if h.taskCancel != nil {
+		h.taskCancel()
+		h.taskCancel = nil
+	}
 	h.taskMu.Unlock()
 }
 
@@ -74,6 +82,20 @@ func (h *Handlers) isTaskRunning() bool {
 	h.taskMu.Lock()
 	defer h.taskMu.Unlock()
 	return h.taskRunning
+}
+
+func (h *Handlers) PostTaskStop(w http.ResponseWriter, r *http.Request) {
+	h.taskMu.Lock()
+	if !h.taskRunning {
+		h.taskMu.Unlock()
+		h.writeError(w, http.StatusBadRequest, "没有正在运行的任务")
+		return
+	}
+	if h.taskCancel != nil {
+		h.taskCancel()
+	}
+	h.taskMu.Unlock()
+	h.writeJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
 }
 
 func (h *Handlers) GetAPIConfig(w http.ResponseWriter, r *http.Request) {
@@ -165,14 +187,20 @@ func (h *Handlers) PostOutlineGenerate(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		h.logger.TaskStart("outline_generation")
+		ctx := h.taskCtx
 
 		h.logger.Info("正在生成小说大纲...")
-		err := GenerateOutlineAction(h.apiCfg, h.cfg, h.state, h.progressPath, h.logger)
+		err := GenerateOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, h.logger)
 
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("大纲生成失败: %v", err))
-			h.logger.TaskEnd("outline_generation", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("大纲生成已取消")
+				h.logger.TaskEnd("outline_generation", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("大纲生成失败: %v", err))
+				h.logger.TaskEnd("outline_generation", false)
+			}
 			return
 		}
 
@@ -227,14 +255,20 @@ func (h *Handlers) PostOutlineRevise(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		h.logger.TaskStart("outline_revision")
+		ctx := h.taskCtx
 
 		h.logger.Info("正在根据意见修订大纲...")
-		err := ReviseOutlineAction(h.apiCfg, h.cfg, h.state, h.progressPath, body.Feedback, h.logger)
+		err := ReviseOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, body.Feedback, h.logger)
 
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("大纲修订失败: %v", err))
-			h.logger.TaskEnd("outline_revision", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("大纲修订已取消")
+				h.logger.TaskEnd("outline_revision", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("大纲修订失败: %v", err))
+				h.logger.TaskEnd("outline_revision", false)
+			}
 			return
 		}
 
@@ -255,6 +289,7 @@ func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		h.logger.TaskStart("chapter_generation")
+		ctx := h.taskCtx
 
 		chIdx := h.state.CurrentChapterIndex
 		chTitle := ""
@@ -263,12 +298,17 @@ func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.logger.Info(fmt.Sprintf("正在创作第 %d 章...", chIdx+1))
-		err := GenerateChapterAction(h.apiCfg, h.cfg, h.state, h.progressPath, h.settings, h.logger)
+		err := GenerateChapterAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, h.settings, h.logger)
 
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("章节创作失败: %v", err))
-			h.logger.TaskEnd("chapter_generation", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("章节创作已取消")
+				h.logger.TaskEnd("chapter_generation", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("章节创作失败: %v", err))
+				h.logger.TaskEnd("chapter_generation", false)
+			}
 			return
 		}
 
@@ -319,14 +359,20 @@ func (h *Handlers) PostChapterRevise(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		h.logger.TaskStart("chapter_revision")
+		ctx := h.taskCtx
 
 		h.logger.Info("正在根据意见修改当前章节...")
-		err := ReviseChapterAction(h.apiCfg, h.cfg, h.state, h.progressPath, body.Feedback, h.logger)
+		err := ReviseChapterAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, body.Feedback, h.logger)
 
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("章节修订失败: %v", err))
-			h.logger.TaskEnd("chapter_revision", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("章节修订已取消")
+				h.logger.TaskEnd("chapter_revision", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("章节修订失败: %v", err))
+				h.logger.TaskEnd("chapter_revision", false)
+			}
 			return
 		}
 
@@ -462,14 +508,20 @@ func (h *Handlers) PostSettingsReconcile(w http.ResponseWriter, r *http.Request)
 
 	go func() {
 		h.logger.TaskStart("settings_reconciliation")
+		ctx := h.taskCtx
 
 		h.logger.Info("正在协调新设定与已有内容...")
-		err := ReconcileSettingsAction(h.apiCfg, h.cfg, h.state, body, h.progressPath, h.cfgPath, h.logger)
+		err := ReconcileSettingsAction(ctx, h.apiCfg, h.cfg, h.state, body, h.progressPath, h.cfgPath, h.logger)
 
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("设定协调失败: %v", err))
-			h.logger.TaskEnd("settings_reconciliation", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("设定协调已取消")
+				h.logger.TaskEnd("settings_reconciliation", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("设定协调失败: %v", err))
+				h.logger.TaskEnd("settings_reconciliation", false)
+			}
 			return
 		}
 
@@ -598,14 +650,20 @@ func (h *Handlers) PostForeshadowsSuggest(w http.ResponseWriter, r *http.Request
 
 	go func() {
 		h.logger.TaskStart("foreshadow_suggest")
+		ctx := h.taskCtx
 
 		h.logger.Info("正在分析大纲，设计伏笔方案...")
-		suggestions, err := SuggestForeshadows(h.apiCfg, h.cfg, h.state, h.logger)
+		suggestions, err := SuggestForeshadows(ctx, h.apiCfg, h.cfg, h.state, h.logger)
 
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("伏笔建议生成失败: %v", err))
-			h.logger.TaskEnd("foreshadow_suggest", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("伏笔建议已取消")
+				h.logger.TaskEnd("foreshadow_suggest", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("伏笔建议生成失败: %v", err))
+				h.logger.TaskEnd("foreshadow_suggest", false)
+			}
 			return
 		}
 
@@ -793,14 +851,20 @@ func (h *Handlers) PostContinueImport(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		h.logger.TaskStart("continue_analysis")
+		ctx := h.taskCtx
 
 		h.logger.Info("正在分析已有内容...")
-		analysis, err := AnalyzeExistingContent(h.apiCfg, h.cfg, body.Content)
+		analysis, err := AnalyzeExistingContent(ctx, h.apiCfg, h.cfg, body.Content)
 
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("内容分析失败: %v", err))
-			h.logger.TaskEnd("continue_analysis", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("内容分析已取消")
+				h.logger.TaskEnd("continue_analysis", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("内容分析失败: %v", err))
+				h.logger.TaskEnd("continue_analysis", false)
+			}
 			return
 		}
 
@@ -875,14 +939,20 @@ func (h *Handlers) PostOutlineGenerateContinuation(w http.ResponseWriter, r *htt
 
 	go func() {
 		h.logger.TaskStart("continuation_outline")
+		ctx := h.taskCtx
 
 		h.logger.Info("正在生成续写大纲...")
-		err := GenerateContinuationOutline(h.apiCfg, h.cfg, h.state, body.ChapterCount, h.progressPath, h.logger)
+		err := GenerateContinuationOutline(ctx, h.apiCfg, h.cfg, h.state, body.ChapterCount, h.progressPath, h.logger)
 
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("续写大纲生成失败: %v", err))
-			h.logger.TaskEnd("continuation_outline", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("续写大纲生成已取消")
+				h.logger.TaskEnd("continuation_outline", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("续写大纲生成失败: %v", err))
+				h.logger.TaskEnd("continuation_outline", false)
+			}
 			return
 		}
 
@@ -1264,14 +1334,20 @@ func (h *Handlers) PostSettingsAIGenerate(w http.ResponseWriter, r *http.Request
 
 	go func() {
 		h.logger.TaskStart("ai_settings_generate")
+		ctx := h.taskCtx
 
 		h.logger.Info("正在 AI 自动生成设定...")
-		err := h.aiGenerateSettings()
+		err := h.aiGenerateSettings(ctx)
 
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("AI 设定生成失败: %v", err))
-			h.logger.TaskEnd("ai_settings_generate", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("AI 设定生成已取消")
+				h.logger.TaskEnd("ai_settings_generate", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("AI 设定生成失败: %v", err))
+				h.logger.TaskEnd("ai_settings_generate", false)
+			}
 			return
 		}
 
@@ -1283,7 +1359,7 @@ func (h *Handlers) PostSettingsAIGenerate(w http.ResponseWriter, r *http.Request
 	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
 }
 
-func (h *Handlers) aiGenerateSettings() error {
+func (h *Handlers) aiGenerateSettings(ctx context.Context) error {
 	outline := ""
 	for _, ch := range h.state.Chapters {
 		outline += fmt.Sprintf("第%d章《%s》: %s\n", ch.Num, ch.Title, ch.Outline)
@@ -1351,7 +1427,7 @@ func (h *Handlers) aiGenerateSettings() error {
 
 	systemPrompt := "你是一位专业的小说设定生成师。请严格按照要求的JSON格式输出，不要添加任何额外文字或markdown代码块标记。"
 
-	rawResp := CallAPIWithRetryLog(h.apiCfg, systemPrompt, userPrompt, h.logger)
+	rawResp := CallAPIWithRetryLog(ctx, h.apiCfg, systemPrompt, userPrompt, h.logger)
 	rawResp = cleanJSONResponse(rawResp)
 
 	var resp struct {
@@ -1461,6 +1537,7 @@ func (h *Handlers) PostChapterPolish(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		h.logger.TaskStart("chapter_polish")
+		ctx := h.taskCtx
 
 		chIdx := h.state.CurrentChapterIndex
 		if chIdx >= len(h.state.Chapters) {
@@ -1484,12 +1561,17 @@ func (h *Handlers) PostChapterPolish(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.logger.Info(fmt.Sprintf("正在对第 %d 章进行去AI味处理...", h.state.Chapters[chIdx].Num))
-		err := PolishChapterAction(h.apiCfg, h.cfg, h.state, chIdx, polishSkills, h.progressPath, h.logger)
+		err := PolishChapterAction(ctx, h.apiCfg, h.cfg, h.state, chIdx, polishSkills, h.progressPath, h.logger)
 
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("去AI味失败: %v", err))
-			h.logger.TaskEnd("chapter_polish", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("去AI味处理已取消")
+				h.logger.TaskEnd("chapter_polish", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("去AI味失败: %v", err))
+				h.logger.TaskEnd("chapter_polish", false)
+			}
 			return
 		}
 
@@ -1574,6 +1656,7 @@ func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		h.logger.TaskStart("chat_message")
+		ctx := h.taskCtx
 
 		session, err := LoadChatSession(h.sessionsDir, sessionID)
 		if err != nil {
@@ -1609,7 +1692,7 @@ func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		ctx := &AgentContext{
+		agentCtx := &AgentContext{
 			APICfg:       h.apiCfg,
 			Settings:     h.settings,
 			SettingsPath: h.settingsPath,
@@ -1619,11 +1702,16 @@ func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
 			Logger:       h.logger,
 		}
 
-		reply, newHistory, err := RunAgentLoop(ctx, req.Content, history, 10)
+		reply, newHistory, err := RunAgentLoop(ctx, agentCtx, req.Content, history, 10)
 		if err != nil {
 			h.endTask()
-			h.logger.Error(fmt.Sprintf("助理回复失败: %v", err))
-			h.logger.TaskEnd("chat_message", false)
+			if ctx.Err() != nil {
+				h.logger.Warn("助理对话已取消")
+				h.logger.TaskEnd("chat_message", false)
+			} else {
+				h.logger.Error(fmt.Sprintf("助理回复失败: %v", err))
+				h.logger.TaskEnd("chat_message", false)
+			}
 			return
 		}
 
