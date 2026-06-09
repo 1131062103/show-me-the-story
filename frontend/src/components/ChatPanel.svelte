@@ -1,7 +1,7 @@
 <script>
   import { onMount, afterUpdate } from 'svelte';
   import { api } from '../lib/api.js';
-  import { chatSessions, currentChatSession, addToast, showConfirm, taskRunning } from '../lib/stores.js';
+  import { chatSessions, currentChatSession, addToast, showConfirm, taskRunning, lastFailedTask } from '../lib/stores.js';
 
   export let contextPage = 'config';
 
@@ -13,6 +13,42 @@
   $: msgs = ($currentChatSession?.messages || []);
   $: streamingText = $currentChatSession?.streaming_text || '';
   $: pendingTools = $currentChatSession?.pending_tool_calls || [];
+
+  // 重试 API 端点映射
+  const retryEndpoints = {
+    'outline_generation': { method: 'POST', url: '/api/outline/generate' },
+    'outline_revision': { method: 'POST', url: '/api/outline/revise' },
+    'chapter_generation': { method: 'POST', url: '/api/chapter/generate' },
+    'chapter_revision': { method: 'POST', url: '/api/chapter/revise' },
+    'foreshadow_suggest': { method: 'POST', url: '/api/foreshadows/suggest' },
+    'continuation_outline': { method: 'POST', url: '/api/outline/generate-continuation' },
+    'settings_reconciliation': { method: 'POST', url: '/api/settings/reconcile' },
+  };
+
+  function parseContentSegments(text) {
+    if (!text) return [{ type: 'text', content: '' }];
+    const segments = [];
+    const regex = /<tool_call>([\s\S]*?)<\/tool_call>|<tool_call>([\s\S]*)/g;
+    let lastIdx = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        segments.push({ type: 'text', content: text.slice(lastIdx, match.index) });
+      }
+      const jsonStr = (match[1] || match[2] || '').trim();
+      try {
+        const tc = JSON.parse(jsonStr);
+        segments.push({ type: 'tool_call', name: tc.name || tc.tool || '未知工具', args: tc.arguments || tc.args || {} });
+      } catch {
+        segments.push({ type: 'text', content: match[0] });
+      }
+      lastIdx = match.index + match[0].length;
+    }
+    if (lastIdx < text.length) {
+      segments.push({ type: 'text', content: text.slice(lastIdx) });
+    }
+    return segments;
+  }
 
   onMount(async () => {
     try {
@@ -85,14 +121,46 @@
 
     try {
       await api('POST', '/api/chat/sessions/' + $currentChatSession.id + '/messages', { content: msg, context_page: contextPage });
-      const session = await api('GET', '/api/chat/sessions/' + $currentChatSession.id);
-      currentChatSession.set(session);
-      chatSessions.set(await api('GET', '/api/chat/sessions'));
     } catch (e) { addToast(e.message, 'error'); }
   }
 
   function handleKeydown(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  }
+
+  async function stopTask() {
+    try {
+      await api('POST', '/api/task/stop');
+    } catch (e) {}
+  }
+
+  async function retryTask() {
+    const failed = $lastFailedTask;
+    if (!failed) return;
+    lastFailedTask.set(null);
+
+    if (failed.task === 'chat_message') {
+      // 重试聊天消息：重新发送最后一条用户消息
+      if ($currentChatSession?.messages?.length > 0) {
+        const lastUserMsg = [...$currentChatSession.messages].reverse().find(m => m.role === 'user');
+        if (lastUserMsg) {
+          chatInput = lastUserMsg.content;
+          await sendMessage();
+          return;
+        }
+      }
+      addToast('无法重试：找不到上次发送的消息', 'error');
+      return;
+    }
+
+    const endpoint = retryEndpoints[failed.task];
+    if (endpoint) {
+      try {
+        await api(endpoint.method, endpoint.url);
+      } catch (e) { addToast('重试失败: ' + e.message, 'error'); }
+    } else {
+      addToast('此任务类型不支持自动重试', 'error');
+    }
   }
 </script>
 
@@ -105,6 +173,11 @@
     <span class="text-sm text-base-content/50 truncate flex-1">
       {$currentChatSession?.title || '未选择会话'}
     </span>
+    {#if $taskRunning}
+      <button class="btn btn-error btn-xs gap-1" on:click={stopTask}>
+        ⏹ 停止
+      </button>
+    {/if}
     <button class="btn btn-primary btn-xs" on:click={createSession} disabled={$taskRunning}>新建</button>
   </div>
 
@@ -155,9 +228,20 @@
             {/each}
           {/if}
           {#if m.content}
-            <div class="chat chat-start">
-              <div class="chat-bubble bg-base-300 text-sm whitespace-pre-wrap max-w-[85%]">{m.content}</div>
-            </div>
+            {#each parseContentSegments(m.content) as seg}
+              {#if seg.type === 'tool_call'}
+                <div class="chat chat-start">
+                  <div class="chat-bubble bg-base-300 text-xs font-mono max-w-[85%]">
+                    <div class="text-warning font-semibold mb-0.5">🔧 {seg.name}</div>
+                    <div class="text-base-content/50 break-all">{typeof seg.args === 'string' ? seg.args : JSON.stringify(seg.args)}</div>
+                  </div>
+                </div>
+              {:else if seg.content}
+                <div class="chat chat-start">
+                  <div class="chat-bubble bg-base-300 text-sm whitespace-pre-wrap max-w-[85%]">{seg.content}</div>
+                </div>
+              {/if}
+            {/each}
           {/if}
         {:else if m.role === 'tool'}
           <div class="chat chat-start">
@@ -172,19 +256,47 @@
       {#each pendingTools as tc}
         <div class="chat chat-start">
           <div class="chat-bubble bg-base-300 text-xs font-mono max-w-[85%]">
-            <div class="text-warning font-semibold mb-0.5">🔧 调用 {tc.name}...</div>
-            <div class="text-warning animate-pulse">执行中...</div>
+            {#if tc.status === 'running'}
+              <div class="text-warning font-semibold mb-0.5">🔧 调用 {tc.name}...</div>
+              <div class="text-warning animate-pulse">执行中...</div>
+            {:else}
+              <div class="text-success font-semibold mb-0.5">✅ {tc.name}</div>
+              {#if tc.result}
+                <div class="text-base-content/50 break-all max-h-20 overflow-y-auto">{tc.result.length > 200 ? tc.result.slice(0, 200) + '...' : tc.result}</div>
+              {/if}
+            {/if}
           </div>
         </div>
       {/each}
 
       {#if streamingText}
-        <div class="chat chat-start">
-          <div class="chat-bubble bg-base-300 text-sm whitespace-pre-wrap max-w-[85%]">{streamingText}</div>
-        </div>
+        {#each parseContentSegments(streamingText) as seg}
+          {#if seg.type === 'tool_call'}
+            <div class="chat chat-start">
+              <div class="chat-bubble bg-base-300 text-xs font-mono max-w-[85%]">
+                <div class="text-warning font-semibold mb-0.5">🔧 {seg.name}</div>
+                <div class="text-base-content/50 break-all">{typeof seg.args === 'string' ? seg.args : JSON.stringify(seg.args)}</div>
+              </div>
+            </div>
+          {:else if seg.content}
+            <div class="chat chat-start">
+              <div class="chat-bubble bg-base-300 text-sm whitespace-pre-wrap max-w-[85%]">{seg.content}</div>
+            </div>
+          {/if}
+        {/each}
       {/if}
     {/if}
   </div>
+
+  <!-- Retry banner -->
+  {#if $lastFailedTask && !$taskRunning}
+    <div class="border-t border-error/30 bg-error/10 px-3 py-2 flex items-center gap-2 shrink-0">
+      <span class="text-sm text-error">❌ {$lastFailedTask.taskName}失败</span>
+      <div class="flex-1"></div>
+      <button class="btn btn-error btn-xs" on:click={retryTask}>重试</button>
+      <button class="btn btn-ghost btn-xs" on:click={() => lastFailedTask.set(null)}>忽略</button>
+    </div>
+  {/if}
 
   <!-- Input -->
   {#if $currentChatSession}

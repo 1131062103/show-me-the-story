@@ -21,16 +21,22 @@
   let localApiCfg = { base_url: '', model: '', api_key: '', http_timeout_seconds: 300 };
   let localStoryCfg = { type: '', title: '', chapter_count: 30, target_words_per_chapter: 2500, writing_style: '', story_synopsis: '' };
 
-  let apiCfgInitialized = false;
-  let storyCfgInitialized = false;
+  let apiCfgSnapshot = '';
+  let storyCfgSnapshot = '';
 
-  $: if ($apiConfig && !apiCfgInitialized) {
-    localApiCfg = { ...$apiConfig };
-    apiCfgInitialized = true;
+  $: if ($apiConfig) {
+    const snap = JSON.stringify($apiConfig);
+    if (snap !== apiCfgSnapshot) {
+      localApiCfg = { ...$apiConfig };
+      apiCfgSnapshot = snap;
+    }
   }
-  $: if ($config?.story && !storyCfgInitialized) {
-    localStoryCfg = { ...$config.story };
-    storyCfgInitialized = true;
+  $: if ($config?.story) {
+    const snap = JSON.stringify($config.story);
+    if (snap !== storyCfgSnapshot) {
+      localStoryCfg = { ...$config.story };
+      storyCfgSnapshot = snap;
+    }
   }
 
   $: hasAccepted = $progress?.chapters?.some(c => c.status === 'accepted') || false;

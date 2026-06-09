@@ -47,19 +47,16 @@
     {#if $taskRunning}
       <span class="badge badge-sm badge-warning gap-1">
         <span class="loading loading-spinner loading-xs"></span>
-        运行中
+        AI 思考中
       </span>
-      <button class="btn btn-error btn-xs gap-1" on:click={stopTask}>
-        ⏹ 停止
-      </button>
     {/if}
   </header>
 
   <div class="flex flex-1 overflow-hidden">
     <!-- Left: Nav + Content -->
-    <div class="flex flex-col w-[35%] min-w-[320px] border-r border-base-content/10 shrink-0">
+    <div class="flex flex-col w-1/2 min-w-[320px] border-r border-base-content/10 shrink-0">
       <!-- Nav -->
-      <nav class="flex bg-base-200 border-b border-base-content/10 px-2 py-1.5 shrink-0 gap-1">
+      <nav class="flex bg-base-200 border-b border-base-content/10 px-3 py-2 shrink-0 gap-1">
         {#each [
           ['config', '配置'],
           ['outline', '大纲'],
@@ -68,16 +65,12 @@
           ['skills', '技能']
         ] as [page, label]}
           <button
-            class="btn btn-ghost btn-sm {$currentPage === page ? 'btn-active border-b-2 border-primary rounded-none' : ''}"
+            class="btn btn-ghost btn-sm text-sm px-4 {$currentPage === page ? 'btn-active border-b-2 border-primary rounded-none' : ''}"
             on:click={() => window.location.hash = '#' + page}
           >
             {label}
           </button>
         {/each}
-        <div class="flex-1"></div>
-        {#if $taskRunning}
-          <div class="px-2 text-xs text-warning animate-pulse self-center">AI 思考中...</div>
-        {/if}
       </nav>
 
       <!-- Content -->

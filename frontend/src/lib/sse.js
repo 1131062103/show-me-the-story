@@ -1,4 +1,4 @@
-import { addLog, addToast, config, progress, taskRunning, streamingContent, streamingChapterIdx, continueAnalysis, currentChatSession, settings, taskNotification } from './stores.js';
+import { addLog, addToast, config, progress, taskRunning, streamingContent, streamingChapterIdx, continueAnalysis, currentChatSession, settings, taskNotification, chatSessions, lastFailedTask } from './stores.js';
 import { api } from './api.js';
 
 let eventSource = null;
@@ -17,10 +17,13 @@ export function connectSSE() {
     api('GET', '/api/progress').then(p => progress.set(p)).catch(() => {});
   });
 
-  eventSource.addEventListener('task_start', () => {
+  eventSource.addEventListener('task_start', e => {
+    const d = JSON.parse(e.data);
     taskRunning.set(true);
     streamingContent.set('');
     streamingChapterIdx.set(-1);
+    // 新任务开始时清除重试信息
+    lastFailedTask.set(null);
   });
 
   const taskNames = {
@@ -41,9 +44,30 @@ export function connectSSE() {
     streamingContent.set('');
     streamingChapterIdx.set(-1);
     api('GET', '/api/progress').then(p => progress.set(p)).catch(() => {});
+
     if (d.success) {
       const name = taskNames[d.task] || d.task;
       taskNotification.set({ task: d.task, name, message: `${name}已完成` });
+    } else {
+      // 任务失败时记录重试信息
+      lastFailedTask.set({ task: d.task, taskName: taskNames[d.task] || d.task });
+    }
+
+    if (d.task === 'chat_message') {
+      let sessionId = null;
+      currentChatSession.update(s => {
+        if (!s) return s;
+        sessionId = s.id;
+        return { ...s, streaming_text: '' };
+      });
+      if (sessionId) {
+        api('GET', '/api/chat/sessions/' + sessionId).then(s => {
+          currentChatSession.set(s);
+        }).catch(() => {});
+      }
+      api('GET', '/api/chat/sessions').then(s => chatSessions.set(s)).catch(() => {});
+      api('GET', '/api/config').then(c => config.set(c)).catch(() => {});
+      api('GET', '/api/settings').then(s => settings.set(s)).catch(() => {});
     }
   });
 
@@ -110,6 +134,9 @@ export function connectSSE() {
       );
       return { ...s, pending_tool_calls: toolCalls };
     });
+    api('GET', '/api/config').then(c => config.set(c)).catch(() => {});
+    api('GET', '/api/settings').then(s => settings.set(s)).catch(() => {});
+    api('GET', '/api/progress').then(p => progress.set(p)).catch(() => {});
   });
 
   eventSource.onerror = () => {

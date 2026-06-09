@@ -25,6 +25,9 @@ export const wvFilter = writable('all');
 
 export const logEntries = writable([]);
 
+// 重试信息：记录最后一次失败的任务
+export const lastFailedTask = writable(null);
+
 export function addLog(entry) {
   logEntries.update(entries => {
     const next = [...entries, entry];

@@ -23,11 +23,14 @@ type Handlers struct {
 	logger       *LogBroadcaster
 	taskMu       sync.Mutex
 	taskRunning  bool
+	activeWork   int // 主任务 + 子任务计数
 	taskCtx      context.Context
 	taskCancel   context.CancelFunc
 	projectDir   string
 
 	pendingContinueContent string
+	lastChatMessage        string      // 缓存最后发送的聊天消息，用于重试
+	lastReconcileBody      StoryConfig // 缓存最后的设定协调请求
 }
 
 func NewHandlers(apiCfg *APIConfig, apiCfgPath string, cfg *Config, cfgPath string, state *Progress, progressPath string, settings *ProjectSettings, settingsPath string, skills []Skill, sessionsDir string, logger *LogBroadcaster, projectDir string) *Handlers {
@@ -60,28 +63,44 @@ func (h *Handlers) writeError(w http.ResponseWriter, code int, msg string) {
 func (h *Handlers) tryStartTask() bool {
 	h.taskMu.Lock()
 	defer h.taskMu.Unlock()
-	if h.taskRunning {
+	if h.taskRunning || h.activeWork > 0 {
 		return false
 	}
 	h.taskRunning = true
+	h.activeWork = 1
 	h.taskCtx, h.taskCancel = context.WithCancel(context.Background())
 	return true
 }
 
 func (h *Handlers) endTask() {
 	h.taskMu.Lock()
-	h.taskRunning = false
-	if h.taskCancel != nil {
-		h.taskCancel()
-		h.taskCancel = nil
+	h.activeWork--
+	if h.activeWork <= 0 {
+		h.activeWork = 0
+		h.taskRunning = false
+		if h.taskCancel != nil {
+			h.taskCancel()
+			h.taskCancel = nil
+		}
 	}
 	h.taskMu.Unlock()
+}
+
+// startChildWork 增加活跃工作计数（用于 Agent 子任务），不创建新 context
+func (h *Handlers) startChildWork() bool {
+	h.taskMu.Lock()
+	defer h.taskMu.Unlock()
+	if !h.taskRunning {
+		return false
+	}
+	h.activeWork++
+	return true
 }
 
 func (h *Handlers) isTaskRunning() bool {
 	h.taskMu.Lock()
 	defer h.taskMu.Unlock()
-	return h.taskRunning
+	return h.taskRunning || h.activeWork > 0
 }
 
 func (h *Handlers) PostTaskStop(w http.ResponseWriter, r *http.Request) {
@@ -180,12 +199,47 @@ func (h *Handlers) DeleteProgress(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) PostOutlineGenerate(w http.ResponseWriter, r *http.Request) {
+	// 检查是否有写作中/审核中的章节，如果有则拒绝
+	for _, ch := range h.state.Chapters {
+		if ch.Status == StatusWriting || ch.Status == StatusReview {
+			h.writeError(w, http.StatusConflict, "有正在写作/审核中的章节，请先处理后再重新生成大纲")
+			return
+		}
+	}
+
 	if !h.tryStartTask() {
 		h.writeError(w, http.StatusConflict, "有任务正在运行，请等待完成")
 		return
 	}
 
 	go func() {
+		defer h.endTask()
+
+		// 自动清除旧的大纲（仅 pending 章节，保留 accepted 的通过正常流程处理）
+		hasPending := false
+		for _, ch := range h.state.Chapters {
+			if ch.Status == StatusPending {
+				hasPending = true
+				break
+			}
+		}
+		if hasPending {
+			var kept []ChapterState
+			for _, ch := range h.state.Chapters {
+				if ch.Status != StatusPending {
+					kept = append(kept, ch)
+				}
+			}
+			h.state.Chapters = kept
+			if len(h.state.Chapters) == 0 {
+				h.state.Title = ""
+				h.state.CorePrompt = ""
+				h.state.StorySynopsis = ""
+				h.state.StoryConfigSnapshot = nil
+				h.state.CurrentChapterIndex = 0
+			}
+			h.logger.Info("已自动清除旧的大纲（pending 章节）")
+		}
 		h.logger.TaskStart("outline_generation")
 		ctx := h.taskCtx
 
@@ -193,7 +247,6 @@ func (h *Handlers) PostOutlineGenerate(w http.ResponseWriter, r *http.Request) {
 		err := GenerateOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, h.logger)
 
 		if err != nil {
-			h.endTask()
 			if ctx.Err() != nil {
 				h.logger.Warn("大纲生成已取消")
 				h.logger.TaskEnd("outline_generation", false)
@@ -204,7 +257,6 @@ func (h *Handlers) PostOutlineGenerate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.endTask()
 		h.logger.Success("大纲生成完成！")
 		h.logger.TaskEnd("outline_generation", true)
 		h.broadcastProgress()
@@ -254,6 +306,7 @@ func (h *Handlers) PostOutlineRevise(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		defer h.endTask()
 		h.logger.TaskStart("outline_revision")
 		ctx := h.taskCtx
 
@@ -261,7 +314,6 @@ func (h *Handlers) PostOutlineRevise(w http.ResponseWriter, r *http.Request) {
 		err := ReviseOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, body.Feedback, h.logger)
 
 		if err != nil {
-			h.endTask()
 			if ctx.Err() != nil {
 				h.logger.Warn("大纲修订已取消")
 				h.logger.TaskEnd("outline_revision", false)
@@ -272,7 +324,6 @@ func (h *Handlers) PostOutlineRevise(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.endTask()
 		h.logger.Success("大纲已修订。")
 		h.logger.TaskEnd("outline_revision", true)
 		h.broadcastProgress()
@@ -288,6 +339,7 @@ func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		defer h.endTask()
 		h.logger.TaskStart("chapter_generation")
 		ctx := h.taskCtx
 
@@ -301,7 +353,6 @@ func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
 		err := GenerateChapterAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, h.settings, h.logger)
 
 		if err != nil {
-			h.endTask()
 			if ctx.Err() != nil {
 				h.logger.Warn("章节创作已取消")
 				h.logger.TaskEnd("chapter_generation", false)
@@ -312,7 +363,6 @@ func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.endTask()
 		h.logger.Success(fmt.Sprintf("第 %d 章《%s》创作完成！", chIdx+1, chTitle))
 		h.logger.TaskEnd("chapter_generation", true)
 		h.broadcastProgress()
@@ -358,6 +408,7 @@ func (h *Handlers) PostChapterRevise(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		defer h.endTask()
 		h.logger.TaskStart("chapter_revision")
 		ctx := h.taskCtx
 
@@ -365,7 +416,6 @@ func (h *Handlers) PostChapterRevise(w http.ResponseWriter, r *http.Request) {
 		err := ReviseChapterAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, body.Feedback, h.settings, h.logger)
 
 		if err != nil {
-			h.endTask()
 			if ctx.Err() != nil {
 				h.logger.Warn("章节修订已取消")
 				h.logger.TaskEnd("chapter_revision", false)
@@ -376,7 +426,6 @@ func (h *Handlers) PostChapterRevise(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.endTask()
 		h.logger.Success("章节已修订。")
 		h.logger.TaskEnd("chapter_revision", true)
 		h.broadcastProgress()
@@ -507,6 +556,7 @@ func (h *Handlers) PostSettingsReconcile(w http.ResponseWriter, r *http.Request)
 	}
 
 	go func() {
+		defer h.endTask()
 		h.logger.TaskStart("settings_reconciliation")
 		ctx := h.taskCtx
 
@@ -514,7 +564,6 @@ func (h *Handlers) PostSettingsReconcile(w http.ResponseWriter, r *http.Request)
 		err := ReconcileSettingsAction(ctx, h.apiCfg, h.cfg, h.state, body, h.progressPath, h.cfgPath, h.logger)
 
 		if err != nil {
-			h.endTask()
 			if ctx.Err() != nil {
 				h.logger.Warn("设定协调已取消")
 				h.logger.TaskEnd("settings_reconciliation", false)
@@ -525,7 +574,6 @@ func (h *Handlers) PostSettingsReconcile(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		h.endTask()
 		h.logger.Success("设定协调完成！")
 		h.logger.TaskEnd("settings_reconciliation", true)
 		h.broadcastProgress()
@@ -609,13 +657,13 @@ func (h *Handlers) broadcastProgress() {
 		pct = float64(accepted) / float64(total) * 100
 	}
 	h.logger.ProgressUpdate(map[string]interface{}{
-		"phase":            h.state.Phase,
-		"title":            h.state.Title,
-		"current_chapter":  h.state.CurrentChapterIndex,
-		"total_chapters":   total,
+		"phase":             h.state.Phase,
+		"title":             h.state.Title,
+		"current_chapter":   h.state.CurrentChapterIndex,
+		"total_chapters":    total,
 		"accepted_chapters": accepted,
-		"percent":          pct,
-		"is_task_running":  h.isTaskRunning(),
+		"percent":           pct,
+		"is_task_running":   h.isTaskRunning(),
 	})
 }
 
@@ -649,6 +697,7 @@ func (h *Handlers) PostForeshadowsSuggest(w http.ResponseWriter, r *http.Request
 	}
 
 	go func() {
+		defer h.endTask()
 		h.logger.TaskStart("foreshadow_suggest")
 		ctx := h.taskCtx
 
@@ -656,7 +705,6 @@ func (h *Handlers) PostForeshadowsSuggest(w http.ResponseWriter, r *http.Request
 		suggestions, err := SuggestForeshadows(ctx, h.apiCfg, h.cfg, h.state, h.logger)
 
 		if err != nil {
-			h.endTask()
 			if ctx.Err() != nil {
 				h.logger.Warn("伏笔建议已取消")
 				h.logger.TaskEnd("foreshadow_suggest", false)
@@ -667,7 +715,6 @@ func (h *Handlers) PostForeshadowsSuggest(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		h.endTask()
 		h.logger.Success(fmt.Sprintf("伏笔建议生成完成，共 %d 条", len(suggestions)))
 		h.logger.TaskEnd("foreshadow_suggest", true)
 		h.logger.ForeshadowSuggestions(suggestions)
@@ -725,12 +772,12 @@ func (h *Handlers) PutForeshadow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name          string          `json:"name"`
-		Description   string          `json:"description"`
-		PlantChapter  int             `json:"plant_chapter"`
-		TargetChapter int             `json:"target_chapter"`
+		Name          string           `json:"name"`
+		Description   string           `json:"description"`
+		PlantChapter  int              `json:"plant_chapter"`
+		TargetChapter int              `json:"target_chapter"`
 		Status        ForeshadowStatus `json:"status"`
-		Resolution    string          `json:"resolution"`
+		Resolution    string           `json:"resolution"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "无效的JSON: "+err.Error())
@@ -850,6 +897,7 @@ func (h *Handlers) PostContinueImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		defer h.endTask()
 		h.logger.TaskStart("continue_analysis")
 		ctx := h.taskCtx
 
@@ -857,7 +905,6 @@ func (h *Handlers) PostContinueImport(w http.ResponseWriter, r *http.Request) {
 		analysis, err := AnalyzeExistingContent(ctx, h.apiCfg, h.cfg, body.Content)
 
 		if err != nil {
-			h.endTask()
 			if ctx.Err() != nil {
 				h.logger.Warn("内容分析已取消")
 				h.logger.TaskEnd("continue_analysis", false)
@@ -870,7 +917,6 @@ func (h *Handlers) PostContinueImport(w http.ResponseWriter, r *http.Request) {
 
 		h.pendingContinueContent = body.Content
 
-		h.endTask()
 		h.logger.Success(fmt.Sprintf("内容分析完成，发现 %d 章", len(analysis.Chapters)))
 		h.logger.TaskEnd("continue_analysis", true)
 		h.logger.ContinueAnalysisResult(analysis)
@@ -938,6 +984,7 @@ func (h *Handlers) PostOutlineGenerateContinuation(w http.ResponseWriter, r *htt
 	}
 
 	go func() {
+		defer h.endTask()
 		h.logger.TaskStart("continuation_outline")
 		ctx := h.taskCtx
 
@@ -945,7 +992,6 @@ func (h *Handlers) PostOutlineGenerateContinuation(w http.ResponseWriter, r *htt
 		err := GenerateContinuationOutline(ctx, h.apiCfg, h.cfg, h.state, body.ChapterCount, h.progressPath, h.logger)
 
 		if err != nil {
-			h.endTask()
 			if ctx.Err() != nil {
 				h.logger.Warn("续写大纲生成已取消")
 				h.logger.TaskEnd("continuation_outline", false)
@@ -956,7 +1002,6 @@ func (h *Handlers) PostOutlineGenerateContinuation(w http.ResponseWriter, r *htt
 			return
 		}
 
-		h.endTask()
 		h.logger.Success("续写大纲生成完成！")
 		h.logger.TaskEnd("continuation_outline", true)
 		h.broadcastProgress()
@@ -1491,6 +1536,9 @@ func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 缓存消息用于重试
+	h.lastChatMessage = req.Content
+
 	go func() {
 		h.logger.TaskStart("chat_message")
 		ctx := h.taskCtx
@@ -1533,9 +1581,8 @@ func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 
-		reply, newHistory, err := RunAgentLoop(ctx, agentCtx, req.Content, history, 10)
+		reply, newHistory, err := RunAgentLoop(ctx, agentCtx, req.Content, history, 30)
 		if err != nil {
-			h.endTask()
 			if ctx.Err() != nil {
 				h.logger.Warn("助理对话已取消")
 				h.logger.TaskEnd("chat_message", false)

@@ -31,9 +31,9 @@ type AgentContext struct {
 }
 
 type AgentStep struct {
-	Role      string
-	Content   string
-	ToolCall  *ToolCall
+	Role       string
+	Content    string
+	ToolCall   *ToolCall
 	ToolResult string
 }
 
@@ -182,10 +182,18 @@ func buildAgentSystemPrompt(ctx *AgentContext, toolDesc string) string {
 	sb.WriteString("\n\n")
 
 	sb.WriteString("## 工具调用格式\n")
-	sb.WriteString("当需要调用工具时，使用以下格式（必须是合法的JSON）：\n")
+	sb.WriteString("当需要调用工具时，严格使用以下格式。注意：必须是合法的JSON，不要用XML标签包裹：\n")
 	sb.WriteString("<tool_call>\n")
-	sb.WriteString(`{"name": "工具名称", "arguments": {参数}}`)
+	sb.WriteString(`{"name": "工具名称", "arguments": {"参数名": "参数值"}}`)
 	sb.WriteString("\n</tool_call>\n\n")
+	sb.WriteString("正确示例：\n")
+	sb.WriteString("<tool_call>\n")
+	sb.WriteString(`{"name": "search_project", "arguments": {"query": "人物"}}`)
+	sb.WriteString("\n</tool_call>\n\n")
+	sb.WriteString("错误示例（不要这样写）：\n")
+	sb.WriteString("- 不要在 tool_call 标签内使用 arguments 等XML标签\n")
+	sb.WriteString("- 不要在 tool_call 标签外写工具调用JSON\n")
+	sb.WriteString("- 不要输出多个 tool_call 标签\n")
 	sb.WriteString("一次只能调用一个工具。等收到工具结果后再继续。\n")
 	sb.WriteString("当不需要调用工具时，直接回复用户即可。\n\n")
 
@@ -223,14 +231,41 @@ func parseToolCall(content string) *ToolCall {
 
 	endIdx := strings.Index(content[idx:], "</tool_call>")
 	if endIdx == -1 {
+		// 标签未闭合，fallback 到全局搜索
 		if tc := parseToolCallFunctionName(content); tc != nil {
 			return tc
 		}
 		return parseToolCallJSON(content)
 	}
 
-	jsonStr := strings.TrimSpace(content[idx+len("<tool_call>") : idx+endIdx])
-	return parseToolCallFromJSON(jsonStr)
+	inner := strings.TrimSpace(content[idx+len("<tool_call>") : idx+endIdx])
+
+	// 优先尝试直接 JSON 解析
+	if tc := parseToolCallFromJSON(inner); tc != nil {
+		return tc
+	}
+
+	// 尝试 XML 格式解析（<name>...</name> + <arguments>...</arguments>）
+	if tc := parseToolCallFromXML(inner); tc != nil {
+		return tc
+	}
+
+	// 标签内解析失败，fallback：在 </tool_call> 之后继续搜索 JSON
+	remaining := content[idx+endIdx+len("</tool_call>"):]
+	if tc := parseToolCallJSON(remaining); tc != nil {
+		return tc
+	}
+
+	// 最终 fallback：在全部内容中搜索 JSON 工具调用
+	if tc := parseToolCallJSON(content); tc != nil {
+		return tc
+	}
+
+	if tc := parseToolCallFunctionName(content); tc != nil {
+		return tc
+	}
+
+	return nil
 }
 
 func parseToolCallFunctionName(content string) *ToolCall {
@@ -263,12 +298,57 @@ func parseToolCallFunctionName(content string) *ToolCall {
 	return nil
 }
 
-func parseToolCallJSON(content string) *ToolCall {
-	jsonStr := extractJSON(content)
-	if jsonStr == "" {
+func parseToolCallFromXML(inner string) *ToolCall {
+	// Parse XML format: <name>tool_name</name><arguments>{json}</arguments>
+	nameStart := strings.Index(inner, "<name>")
+	nameEnd := strings.Index(inner, "</name>")
+	if nameStart == -1 || nameEnd == -1 || nameEnd <= nameStart {
 		return nil
 	}
-	return parseToolCallFromJSON(jsonStr)
+	name := strings.TrimSpace(inner[nameStart+len("<name>") : nameEnd])
+	if name == "" {
+		return nil
+	}
+
+	args := json.RawMessage("{}")
+	argsStart := strings.Index(inner, "<arguments>")
+	argsEnd := strings.Index(inner, "</arguments>")
+	if argsStart != -1 && argsEnd != -1 && argsEnd > argsStart {
+		argsStr := strings.TrimSpace(inner[argsStart+len("<arguments>") : argsEnd])
+		if argsStr != "" {
+			var parsed json.RawMessage
+			if json.Unmarshal([]byte(argsStr), &parsed) == nil {
+				args = parsed
+			}
+		}
+	}
+
+	return &ToolCall{Name: name, Arguments: args}
+}
+
+func parseToolCallJSON(content string) *ToolCall {
+	// Try all JSON objects in the content, not just the first one
+	remaining := content
+	for {
+		start := strings.Index(remaining, "{")
+		if start == -1 {
+			return nil
+		}
+		remaining = remaining[start:]
+
+		jsonStr := extractJSON(remaining)
+		if jsonStr == "" {
+			return nil
+		}
+
+		tc := parseToolCallFromJSON(jsonStr)
+		if tc != nil {
+			return tc
+		}
+
+		// Move past this JSON object to try the next one
+		remaining = remaining[len(jsonStr):]
+	}
 }
 
 func parseToolCallFromJSON(jsonStr string) *ToolCall {
@@ -631,14 +711,14 @@ func getBuiltinTools() []Tool {
 							ctx.Settings.Characters[i].Notes = params.Notes
 						}
 
-					if err := SaveProjectSettings(ctx.SettingsPath, ctx.Settings); err != nil {
-						return "", fmt.Errorf("保存失败: %w", err)
-					}
-					if ctx.Logger != nil {
-						ctx.Logger.SettingsUpdated()
-					}
+						if err := SaveProjectSettings(ctx.SettingsPath, ctx.Settings); err != nil {
+							return "", fmt.Errorf("保存失败: %w", err)
+						}
+						if ctx.Logger != nil {
+							ctx.Logger.SettingsUpdated()
+						}
 
-					return fmt.Sprintf("角色「%s」已更新", ctx.Settings.Characters[i].Name), nil
+						return fmt.Sprintf("角色「%s」已更新", ctx.Settings.Characters[i].Name), nil
 					}
 				}
 				return fmt.Sprintf("未找到角色: %s", params.ID), nil
