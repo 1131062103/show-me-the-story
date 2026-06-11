@@ -288,6 +288,7 @@ func generateChapterContentStream(ctx context.Context, apiCfg *APIConfig, cfg *C
 		"CorePrompt":       state.CorePrompt,
 		"StorySynopsis":    preferUserValue(cfg.Story.StorySynopsis, state.StorySynopsis),
 		"HistorySummary":   historySummary,
+		"PreviousEnding":   buildPreviousChapterTail(state, idx),
 		"ChapterTitle":     ch.Title,
 		"ChapterOutline":   ch.Outline,
 		"WritingStyle":     cfg.Story.WritingStyle,
@@ -521,6 +522,130 @@ func buildHistorySummary(state *Progress, idx int) string {
 		history = "当前为故事开端，无历史前情。"
 	}
 	return history
+}
+
+const (
+	prevTailMaxRunes = 800  // 注入上一章尾部原文的最大字数
+	openingMaxRunes  = 1000 // 衔接优化时提取本章开头片段的最大字数
+)
+
+// tailAtParagraph 取 content 末尾约 maxRunes 字，向后对齐到段落边界，避免从半句开始。
+func tailAtParagraph(content string, maxRunes int) string {
+	trimmed := strings.TrimSpace(content)
+	runes := []rune(trimmed)
+	if len(runes) <= maxRunes {
+		return trimmed
+	}
+	tail := string(runes[len(runes)-maxRunes:])
+	if i := strings.IndexByte(tail, '\n'); i >= 0 && i+1 < len(tail) {
+		tail = tail[i+1:]
+	}
+	return strings.TrimSpace(tail)
+}
+
+// buildPreviousChapterTail 返回上一章结尾原文片段（含说明包装），无上一章或内容为空时返回空字符串。
+func buildPreviousChapterTail(state *Progress, idx int) string {
+	if idx <= 0 || idx >= len(state.Chapters) {
+		return ""
+	}
+	prev := state.Chapters[idx-1]
+	if prev.Content == "" {
+		return ""
+	}
+	tail := tailAtParagraph(prev.Content, prevTailMaxRunes)
+	if tail == "" {
+		return ""
+	}
+	return fmt.Sprintf("【上一章结尾原文（仅供无缝承接场景与情绪，禁止复述或改写）】\n%s\n\n", tail)
+}
+
+// splitChapterOpening 把章节正文切分为开头片段与剩余部分，切点向前对齐到段落边界。
+// rest 为空表示整章都算开头（章节较短）。
+func splitChapterOpening(content string, maxRunes int) (opening, rest string) {
+	runes := []rune(content)
+	if len(runes) <= maxRunes {
+		return content, ""
+	}
+	cut := maxRunes
+	for i := maxRunes; i > 0; i-- {
+		if runes[i-1] == '\n' {
+			cut = i
+			break
+		}
+	}
+	return string(runes[:cut]), string(runes[cut:])
+}
+
+// SmoothTransitionsAction 批量优化已确认章节之间的衔接：
+// 逐章把上一章尾部与本章开头交给 AI 判断，仅在衔接生硬时最小化重写本章开头片段。
+// 每处理完一章立即落盘，任务可随时取消且不丢已完成部分。
+func SmoothTransitionsAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, progressPath string, logger *LogBroadcaster) error {
+	if err := validateAPIConfig(apiCfg); err != nil {
+		return err
+	}
+
+	var targets []int
+	for i := 1; i < len(state.Chapters); i++ {
+		if state.Chapters[i].Status == StatusAccepted && state.Chapters[i].Content != "" &&
+			state.Chapters[i-1].Status == StatusAccepted && state.Chapters[i-1].Content != "" {
+			targets = append(targets, i)
+		}
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("没有可优化的章节（需要至少两个相邻的已确认章节）")
+	}
+
+	logger.Info(fmt.Sprintf("开始章节衔接优化，共 %d 章待检查", len(targets)))
+	optimized := 0
+	for n, idx := range targets {
+		if ctx.Err() != nil {
+			return fmt.Errorf("任务已取消")
+		}
+		ch := &state.Chapters[idx]
+		logger.StepInfo(n+1, len(targets), fmt.Sprintf("正在检查第 %d 章《%s》的衔接...", ch.Num, ch.Title))
+
+		prevTail := tailAtParagraph(state.Chapters[idx-1].Content, prevTailMaxRunes)
+		opening, rest := splitChapterOpening(ch.Content, openingMaxRunes)
+
+		userPrompt := RenderPrompt(cfg.Prompts.TransitionSmoothing, map[string]string{
+			"ChapterNum":     fmt.Sprintf("%d", ch.Num),
+			"ChapterTitle":   ch.Title,
+			"ChapterOutline": ch.Outline,
+			"PrevTail":       prevTail,
+			"Opening":        opening,
+		})
+		systemPrompt := "你是一位资深小说编辑，擅长打磨章节之间的衔接。请严格按要求输出。"
+
+		resp := CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)
+		if resp == "" {
+			return fmt.Errorf("第 %d 章衔接检查调用失败或被取消", ch.Num)
+		}
+		revised := strings.TrimSpace(resp)
+
+		head := revised
+		if len([]rune(head)) > 30 {
+			head = string([]rune(head)[:30])
+		}
+		if revised == "" || strings.Contains(head, "NO_CHANGE") {
+			logger.Info(fmt.Sprintf("第 %d 章衔接自然，无需修改", ch.Num))
+			continue
+		}
+
+		if rest == "" {
+			ch.Content = revised
+		} else {
+			ch.Content = revised + "\n\n" + strings.TrimLeft(rest, "\n")
+		}
+		SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
+		if err := SaveProgress(progressPath, state); err != nil {
+			return err
+		}
+		optimized++
+		logger.Info(fmt.Sprintf("第 %d 章开头已优化并保存", ch.Num))
+	}
+
+	logger.Success(fmt.Sprintf("章节衔接优化完成：检查 %d 章，优化 %d 章", len(targets), optimized))
+	return nil
 }
 
 func PolishChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, chapterIdx int, skills []Skill, progressPath string, logger *LogBroadcaster) error {

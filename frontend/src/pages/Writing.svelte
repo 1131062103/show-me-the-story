@@ -1,7 +1,7 @@
 <script>
   import { tick, onMount } from 'svelte';
   import { api } from '../lib/api.js';
-  import { progress, taskRunning, streamingContent, streamingChapterIdx, selectedChapter, autoConfirm, addToast } from '../lib/stores.js';
+  import { progress, taskRunning, streamingContent, streamingChapterIdx, selectedChapter, autoConfirm, addToast, confirmModal } from '../lib/stores.js';
 
   // 保留 prop 以兼容 App 传参
   export let sendToChat = async () => {};
@@ -137,6 +137,18 @@
 
   function prevChapter() { if ($selectedChapter > 0) selectChapter($selectedChapter - 1); }
   function nextChapter() { if ($selectedChapter < chapters.length - 1) selectChapter($selectedChapter + 1); }
+
+  function smoothTransitions() {
+    confirmModal.set({
+      message: '将逐章检查已确认章节之间的衔接，仅在生硬时由 AI 最小化重写本章开头片段（不改动正文主体），每章处理完立即保存，可随时停止。是否开始？',
+      onConfirm: async () => {
+        try {
+          await api('POST', '/api/chapters/smooth-transitions');
+          addToast('章节衔接优化任务已启动', 'info');
+        } catch (e) { addToast(e.message, 'error'); }
+      },
+    });
+  }
 </script>
 
 {#if !inWriting}
@@ -158,6 +170,9 @@
             <span class="text-xs text-base-content/60">自动确认模式</span>
           </label>
           <span class="text-xs text-base-content/40">全书约 {totalWords.toLocaleString()} 字</span>
+          {#if accepted >= 2}
+            <button class="btn btn-ghost btn-xs" on:click={smoothTransitions} disabled={$taskRunning} title="逐章检查并修补已确认章节之间的衔接，适合修补旧项目">🪡 优化章节衔接</button>
+          {/if}
           <button class="btn btn-ghost btn-xs" on:click={exportBook}>📤 导出 TXT</button>
         </div>
         <progress class="progress progress-primary w-full" value={pct} max="100"></progress>

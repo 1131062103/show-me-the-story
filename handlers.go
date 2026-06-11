@@ -642,6 +642,54 @@ func (h *Handlers) PostChapterReviseSpecific(w http.ResponseWriter, r *http.Requ
 	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
 }
 
+// PostChaptersSmoothTransitions 批量优化已确认章节之间的衔接（修补旧项目用）。
+// 逐章检查上一章结尾与本章开头的衔接，仅在生硬时最小化重写本章开头片段。
+func (h *Handlers) PostChaptersSmoothTransitions(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w) {
+		return
+	}
+
+	pairs := 0
+	for i := 1; i < len(h.state.Chapters); i++ {
+		if h.state.Chapters[i].Status == StatusAccepted && h.state.Chapters[i].Content != "" &&
+			h.state.Chapters[i-1].Status == StatusAccepted && h.state.Chapters[i-1].Content != "" {
+			pairs++
+		}
+	}
+	if pairs == 0 {
+		h.writeError(w, http.StatusBadRequest, "没有可优化的章节（需要至少两个相邻的已确认章节）")
+		return
+	}
+
+	if !h.tryStartTask() {
+		h.writeError(w, http.StatusConflict, "有任务正在运行，请等待完成")
+		return
+	}
+
+	go func() {
+		defer h.endTask()
+		h.logger.TaskStart("smooth_transitions")
+		ctx := h.taskCtx
+
+		err := SmoothTransitionsAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, h.logger)
+		if err != nil {
+			if ctx.Err() != nil {
+				h.logger.Warn("章节衔接优化已取消（已完成部分不会丢失）")
+			} else {
+				h.logger.Error(fmt.Sprintf("章节衔接优化失败: %v", err))
+			}
+			h.logger.TaskEnd("smooth_transitions", false)
+			h.broadcastProgress()
+			return
+		}
+
+		h.logger.TaskEnd("smooth_transitions", true)
+		h.broadcastProgress()
+	}()
+
+	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
 func (h *Handlers) DeleteChapter(w http.ResponseWriter, r *http.Request) {
 	if h.isTaskRunning() {
 		h.writeError(w, http.StatusConflict, "有任务正在运行，无法删除章节")

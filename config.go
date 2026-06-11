@@ -40,6 +40,7 @@ type PromptsConfig struct {
 	ContentAnalysis               string `json:"content_analysis"`
 	ContinuationOutlineGeneration string `json:"continuation_outline_generation"`
 	SettingsReconciliation        string `json:"settings_reconciliation"`
+	TransitionSmoothing           string `json:"transition_smoothing"`
 }
 
 func DefaultAPIConfig() *APIConfig {
@@ -174,5 +175,8 @@ func (p *PromptsConfig) applyDefaults() {
 	}
 	if p.SettingsReconciliation == "" {
 		p.SettingsReconciliation = DefaultPrompts.SettingsReconciliation
+	}
+	if p.TransitionSmoothing == "" {
+		p.TransitionSmoothing = DefaultPrompts.TransitionSmoothing
 	}
 }

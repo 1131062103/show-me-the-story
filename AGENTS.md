@@ -69,7 +69,7 @@ task dev                              # 编译并启动 Go 后端
 | `state.go` | `Progress`、`ChapterState`、`Foreshadow` 结构体，`LoadProgress`、`SaveProgress`（原子写入）、`ChapterMarkdownPath`、`SaveChapterMarkdown(projectDir, ...)`（写入项目目录） |
 | `api.go` | `CallAPI`/`CallAPIMessages`（同步）、`CallAPIStream`/`CallAPIStreamMessages`（流式，支持完整多轮消息历史）、`CallAPIWithRetry`/`CallAPIWithRetryLog`（无限重试）、`CallAPIStreamWithRetry`/`CallAPIStreamWithRetryLog`，`validateAPIConfig`、`isFatalAPIError`（401/403/404 致命，网络超时可重试） |
 | `outline.go` | `generateOutline`、`reviseOutline`、`GenerateOutlineAction`（存在已确认章节时拒绝整体重新生成）、`ReviseOutlineAction`、`ConfirmOutlineAction`、`EditChapterOutline`、`cleanJSONResponse` |
-| `writing.go` | `GenerateChapterAction`、`ReviseChapterAction`（当前审核中章节）、`ReviseSpecificChapterAction`（定向最小化修订任意章节，不影响其他章节）、`ConfirmChapterAction`、`PolishChapterAction`、`parseFactCheckResult`（JSON 优先 + 字符串 fallback）、章节内容生成/摘要/事实核查/流式输出、`buildHistorySummary` |
+| `writing.go` | `GenerateChapterAction`、`ReviseChapterAction`（当前审核中章节）、`ReviseSpecificChapterAction`（定向最小化修订任意章节，不影响其他章节）、`ConfirmChapterAction`、`PolishChapterAction`、`SmoothTransitionsAction`（批量优化已确认章节衔接，逐章最小化重写开头、逐章落盘）、`parseFactCheckResult`（JSON 优先 + 字符串 fallback）、章节内容生成/摘要/事实核查/流式输出、`buildHistorySummary`、`buildPreviousChapterTail`（上一章尾部约 800 字注入写作 prompt）、`splitChapterOpening` |
 | `foreshadow.go` | `SuggestForeshadows`、`UpdateForeshadows`、伏笔格式化注入、伏笔告警、`NextForeshadowID` |
 | `continue.go` | `AnalyzeExistingContent`、`ImportContinueAction`、`GenerateContinuationOutline`、`splitContentByChapters` |
 | `reconcile.go` | `ReconcileSettingsAction`、`regeneratePendingOutlines`、设定协调逻辑 |
@@ -77,7 +77,7 @@ task dev                              # 编译并启动 Go 后端
 | `skills.go` | `Skill`、`SkillConfig` 结构体，`LoadBuiltinSkills`、`LoadProjectSkills`、`MergeSkills`、`GetEnabledSkills`、`GetEnabledSkillsByCategory`、`FormatSkillsContent`，`//go:embed embeds/skills` |
 | `agent.go` | `Tool`、`AgentContext`、`AgentStep`、`ToolCall` 结构体，`RunAgentLoop`（多轮消息历史）、工具调用解析、内置工具集（读/写角色/世界观/章节等）、系统提示词含安全规则与工具选择指南、`requireConfirm`（破坏性工具需 `confirm: true`） |
 | `chat.go` | `ChatSession`、`ChatMessage`、`ChatSessionIndex` 结构体，`LoadChatSessions`、`LoadChatSession`、`SaveChatSession`、`DeleteChatSession` |
-| `handlers.go` | `Handlers` 结构体（含项目管理字段 `progDir`/`projectName`/`projectMu`、自动确认开关 `autoConfirm`）、`projectDir()` 帮助函数、项目切换 `switchProject()`、`ensureProject()` 检查、`rejectIfTaskRunning()`（任务运行期间编辑类端点返回 409）、所有 HTTP handler（含 `PostChapterReviseSpecific` 定向修订、`GetAutoConfirm`/`PutAutoConfirm`）、`PostChapterGenerate` 自动确认循环（开启时每章生成后自动确认并继续下一章）、`tryStartTask`/`endTask`/`startChildWork` 互斥、项目管理 handler（`GetProjects`/`PostProject`/`PostProjectSelect`/`GetProjectCurrent`/`DeleteProject`） |
+| `handlers.go` | `Handlers` 结构体（含项目管理字段 `progDir`/`projectName`/`projectMu`、自动确认开关 `autoConfirm`）、`projectDir()` 帮助函数、项目切换 `switchProject()`、`ensureProject()` 检查、`rejectIfTaskRunning()`（任务运行期间编辑类端点返回 409）、所有 HTTP handler（含 `PostChapterReviseSpecific` 定向修订、`PostChaptersSmoothTransitions` 批量衔接优化、`GetAutoConfirm`/`PutAutoConfirm`）、`PostChapterGenerate` 自动确认循环（开启时每章生成后自动确认并继续下一章）、`tryStartTask`/`endTask`/`startChildWork` 互斥、项目管理 handler（`GetProjects`/`PostProject`/`PostProjectSelect`/`GetProjectCurrent`/`DeleteProject`） |
 | `web.go` | 路由注册（含项目管理端点、`/api/autoconfirm`）、CORS/日志中间件、静态文件服务、`startWebServer`、项目管理 handler（`GetProjects`/`PostProject`/`GetProjectCurrent`/`PostProjectSelect`/`DeleteProject`） |
 | `logger.go` | `LogBroadcaster`（SSE 广播）、所有日志/事件方法（含 `ChatChunk`、`ToolCallStart`、`ToolCallEnd`、`StreamStart`、`StreamProgress`、`PolishResult`） |
 | `prompts.go` | `RenderPrompt`（`{{.KeyName}}` 替换）、`DefaultPrompts` 变量（所有内置提示词模板） |
@@ -102,7 +102,7 @@ task dev                              # 编译并启动 Go 后端
 | `src/lib/markdown.js` | `renderMarkdown(text)` — marked 解析 + DOMPurify 清洗，供聊天气泡渲染 markdown |
 | `src/pages/Config.svelte` | 配置页：API 配置、故事配置（直接 PUT 保存 + 关键设定变更时提示协调）、角色管理、世界观管理、组织管理（卡片 + 成员勾选）、关系管理（卡片 + 源/目标实体选择）；任务运行时所有输入控件禁用 |
 | `src/pages/Outline.svelte` | 大纲页：直接操作按钮（生成/确认/修订意见/删除/生成后续大纲）+ 导入续写 + pending 章节内联编辑 + 流式预览 |
-| `src/pages/Writing.svelte` | 写作页：章节列表（状态点）+ 直接操作（生成/确认/修改意见，自动区分当前章修订与定向修订）+ 自动确认模式开关（toggle，随时可开关）+ 导出 TXT + 复制 + 上下章导航 + 流式自动滚动（自动确认模式下自动跟随正在生成的章节） |
+| `src/pages/Writing.svelte` | 写作页：章节列表（状态点）+ 直接操作（生成/确认/修改意见，自动区分当前章修订与定向修订）+ 自动确认模式开关（toggle，随时可开关）+ 优化章节衔接（进度卡片工具栏小按钮，已确认 ≥ 2 章时显示，ConfirmModal 确认后启动批量衔接优化任务）+ 导出 TXT + 复制 + 上下章导航 + 流式自动滚动（自动确认模式下自动跟随正在生成的章节） |
 | `src/pages/Relations.svelte` | 图谱页：Canvas 力导向图谱（ForceGraph 类），支持拖拽 |
 | `src/pages/Assistant.svelte` | 助理页：聊天会话列表 + 消息区 + 工具调用卡片 + 流式回复 |
 | `src/pages/Skills.svelte` | 技能页：技能表格 + toggle 开关 |
@@ -321,6 +321,7 @@ planted → progressing → resolved
 | POST | `/api/chapter/revise` | 异步 | 修订当前审核中章节 |
 | POST | `/api/chapter/revise/{num}` | 异步 | 定向最小化修订指定章节（含已确认章节，不影响其他章节） |
 | POST | `/api/chapter/polish` | 异步 | 去AI味（需启用 polish 类技能） |
+| POST | `/api/chapters/smooth-transitions` | 异步 | 批量优化已确认章节衔接（逐章检查上一章结尾与本章开头，仅生硬时最小化重写开头片段，逐章落盘可随时停止） |
 | DELETE | `/api/chapter` | 同步 | 删除最后章节 |
 | DELETE | `/api/chapters/from/{num}` | 同步 | 从第 N 章删除到末尾 |
 | DELETE | `/api/outline` | 同步 | 删除大纲 |
@@ -378,6 +379,7 @@ planted → progressing → resolved
 | `ContentAnalysis` | `content_analysis` | 续写内容分析 |
 | `ContinuationOutlineGeneration` | `continuation_outline_generation` | 续写大纲生成 |
 | `SettingsReconciliation` | `settings_reconciliation` | 设定协调 |
+| `TransitionSmoothing` | `transition_smoothing` | 章节衔接优化（判断 + 最小化重写开头片段，无需修改时输出 NO_CHANGE） |
 
 新增 prompt 模板时需要：(1) 在 `PromptsConfig` 添加字段，(2) 在 `DefaultPrompts` 添加默认值，(3) 在 `applyDefaults` 添加 fallback。
 
@@ -390,6 +392,7 @@ planted → progressing → resolved
 | `{{.CorePrompt}}` | `state.CorePrompt` | 核心写作提示词 |
 | `{{.StorySynopsis}}` | `preferUserValue(cfg.Story.StorySynopsis, state.StorySynopsis)` | 故事梗概（优先用户配置） |
 | `{{.HistorySummary}}` | `buildHistorySummary()` | 最近 5 章摘要 |
+| `{{.PreviousEnding}}` | `buildPreviousChapterTail()` | 上一章结尾原文约 800 字（段落对齐，含说明包装；第 1 章或上一章无内容时为空） |
 | `{{.ChapterTitle}}` | `ch.Title` | 本章标题 |
 | `{{.ChapterOutline}}` | `ch.Outline` | 本章大纲（修订时附加用户修改意见） |
 | `{{.WritingStyle}}` | `cfg.Story.WritingStyle` | 写作风格（始终使用当前配置） |
