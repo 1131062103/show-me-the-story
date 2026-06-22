@@ -71,10 +71,10 @@ task dev                              # 编译并启动 Go 后端
 |------|------|
 | `main.go` | 入口，确定程序目录（`progDir`），创建 `storys/` 目录，加载 API 配置，启动 Web 服务器（无项目选择状态）；`var version = "dev"` 通过 CI `-ldflags` 注入实际版本号 |
 | `config.go` | `APIConfig`（含 `ContextBudgetTokens` 全书优化上下文预算）、`Config`（含 `SkillConfig` + `Language`）、`StoryConfig`、`PromptsConfig` 结构体，Load/Save 函数，`DefaultConfigForLang(lang)`、`NormalizeLanguage`、`applyDefaults(lang)` 按语言选择默认 prompts |
-| `state.go` | `Progress`、`ChapterState`、`Foreshadow` 结构体，`LoadProgress`、`SaveProgress`（原子写入）、`ChapterMarkdownPath`、`SaveChapterMarkdown(projectDir, ...)`、`ForeshadowRoadmapPath`（项目目录 `Foreshadows.md`） |
+| `state.go` | `Progress`、`ChapterState`、`Foreshadow`、`MemoryEntry` 结构体，`LoadProgress`、`SaveProgress`（原子写入）、`ChapterMarkdownPath`、`SaveChapterMarkdown(projectDir, ...)`、`ForeshadowRoadmapPath`（项目目录 `Foreshadows.md`） |
 | `api.go` | `CallAPI`/`CallAPIMessages`（**内部优先流式缓冲**，失败时回退 `callAPIMessagesSync`）、`CallAPIStream`/`CallAPIStreamMessages`（流式，含 `stream_options.include_usage`）、`CallAPIWithRetry`/`CallAPIWithRetryLog`（无限重试）、`CallAPIStreamWithRetry`/`CallAPIStreamWithRetryLog`，`validateAPIConfig`、`isFatalAPIError`（401/403/404 致命，网络超时可重试）；所有调用经 `taskCtx` 时自动累计 token（优先 API `usage`，否则 rune 估算） |
 | `outline.go` | `generateOutline`、`reviseOutline`、`GenerateOutlineAction`（存在已确认章节时拒绝整体重新生成）、`ReviseOutlineAction`、`ConfirmOutlineAction`、`EditChapterOutline`、`cleanJSONResponse` |
-| `writing.go` | `GenerateChapterAction`（含写前大纲一致性检查，共 5 步；第 5 步更新伏笔并落盘 `Foreshadows.md`）、`ReviseChapterAction`/`ReviseSpecificChapterAction`（修订后同步更新伏笔）、`ConfirmChapterAction`、`PolishChapterAction`、`SmoothTransitionsAction`（批量优化已确认章节衔接，逐章最小化重写开头、逐章落盘）、`parseFactCheckResult`（JSON 优先 + 字符串 fallback）、`checkOutlineConsistency`（写前检查本章大纲与已写剧情冲突，冲突时最小化修订本章大纲）、章节内容生成/摘要/事实核查/流式输出、`stripChapterMetaProse`（生成/修订/润色后剔除首尾元信息行）、`buildHistorySummary`、`buildPreviousChapterTail`（上一章尾部约 800 字注入写作 prompt）、`buildOutlineConstraints`（全书章节脉络反向约束：后续 10 章大纲防提前出现 + 前文大纲防一次性事件重复，注入写作与事实核查 prompt）、`appendIfMissingPlaceholder`（老项目持久化旧模板缺新占位符时把上下文块追加到渲染结果末尾兜底）、`splitChapterOpening` |
+| `writing.go` | `GenerateChapterAction`（含写前大纲一致性检查，共 6 步；第 5 步更新伏笔并落盘 `Foreshadows.md`；第 6 步维护叙事记忆）、`ReviseChapterAction`/`ReviseSpecificChapterAction`（修订后同步更新伏笔与记忆）、`ConfirmChapterAction`、`PolishChapterAction`、`SmoothTransitionsAction`（批量优化已确认章节衔接，逐章最小化重写开头、逐章落盘）、`parseFactCheckResult`（JSON 优先 + 字符串 fallback）、`checkOutlineConsistency`（写前检查本章大纲与已写剧情冲突，冲突时最小化修订本章大纲）、章节内容生成/摘要/事实核查/流式输出、`stripChapterMetaProse`（生成/修订/润色后剔除首尾元信息行）、`buildHistorySummary`、`buildPreviousChapterTail`（上一章尾部约 800 字注入写作 prompt）、`buildOutlineConstraints`（全书章节脉络反向约束：后续 10 章大纲防提前出现 + 前文大纲防一次性事件重复，注入写作与事实核查 prompt）、`appendIfMissingPlaceholder`（老项目持久化旧模板缺新占位符时把上下文块追加到渲染结果末尾兜底）、`splitChapterOpening`、`syncMemoryAfterChapter`（第 6 步记忆维护）、`calcMemoryMaxTokens`（记忆 token 上限自动计算） |
 | `foreshadow.go` | `SuggestForeshadows`、`UpdateForeshadows`、伏笔格式化注入、伏笔告警、`BuildForeshadowRoadmapMarkdown`、`SaveForeshadowRoadmap`、`syncForeshadowsAfterChapter`、`NextForeshadowID` |
 | `foreshadow_consistency.go` | `CheckForeshadowOutlineConsistency`、`RunForeshadowOutlineCheckAndSave`（大纲/伏笔变更后自动检查，报告写入 `progress.last_foreshadow_outline_report`） |
 | `writing_conflict.go` | `analyzeWritingConflict`、`WritingConflictError`、事实核查多次失败后的根因分析与用户处理选项 |
@@ -95,7 +95,7 @@ task dev                              # 编译并启动 Go 后端
 | `locale.go` | `LangZH`/`LangEN` 常量、`localeFromRequest` 从 `X-UI-Locale`/`Accept-Language`/`?locale=` 解析、`errorCatalog` 双语错误表、`T(lang, key, args)`（同时查 `messageCatalog` + `errorCatalog`）、`systemPrompts` 内联 system prompt 集中表、`SystemPromptFor(lang, key)`、`Handlers.writeErrorReq` 本地化错误响应 |
 | `messages.go` | `messageCatalog`：`log.*` SSE 日志 + `agent.*` 工具状态消息双语表（Go 侧 `%s`/`%d` 模板） |
 | `agent_i18n.go` | Agent 工具 i18n 辅助：`agentMsg(ctx, key, args…)`（按项目语言生成 AI 可读文本并记录 key）、`agentErr`、`AgentContext` 临时 toolMsgKey/Args |
-| `i18n_inject.go` | 注入块的双语版本：`buildOutlineConstraintsForLang`、`buildPreviousChapterTailForLang`、`buildHistorySummaryForLang`、`buildCharacterContextForLang`、`buildWorldviewContextForLang`、`formatActiveForeshadowsForChapterLang`、`formatChapterLine`、`formatForeshadowsForPromptLang` |
+| `i18n_inject.go` | 注入块的双语版本：`buildOutlineConstraintsForLang`、`buildPreviousChapterTailForLang`、`buildHistorySummaryForLang`、`buildCharacterContextForLang`、`buildWorldviewContextForLang`、`formatActiveForeshadowsForChapterLang`、`formatChapterLine`、`formatForeshadowsForPromptLang`、`buildMemoryForLang`（叙事记忆注入）、`extractSnippet`（按段落位置截取原文片段）、`formatMemoryForUpdatePrompt`（格式化已有记忆给更新 prompt） |
 | `filesys.go` | `writeFileImpl`、`deleteFileImpl`、`renameFileImpl` |
 | `skills.go` | `Skill`（含 `Lang` 字段）、`SkillConfig` 结构体，`LoadBuiltinSkills`、`LoadProjectSkills`、`MergeSkills`、`GetEnabledSkills`、`GetEnabledSkillsByCategory`、`FilterSkillsByLang(skills, projectLang)`、`FormatSkillsContent`（按 skill 语言选择双语 header）、`//go:embed embeds/skills` |
 | `embeds/skills/*.md` | 内置 Skill 文件（YAML frontmatter `lang: zh|en` + prompt body），通过 `//go:embed` 嵌入；中文：`humanizer-zh.md` / `story-deslop.md` / `writing-craft.md`；英文：`humanizer-en.md` / `story-deslop-en.md` / `writing-craft-en.md` |
@@ -287,6 +287,18 @@ pending → writing → review → accepted
 
 前端「伏笔」页提供列表、按章节时间线、Markdown 路线图预览；SSE `foreshadow_suggestions` 触发建议确认面板。
 
+### 叙事记忆系统
+
+弥补历史摘要窗口（5 章）之外的叙事细节丢失。每章写作完成后（`GenerateChapterAction` 第 6 步），AI 从正文中提取大纲未体现的关键叙事细节，存入 `Progress.MemoryEntries`。
+
+**数据结构**：`MemoryEntry` 含 `ID`、`Content`（关键细节描述）、`Category`（character/location/item/event/promise/other）、`Chapter`（来源章节号）、`Position`（段落序号，用于自动截取原文片段）。
+
+**Token 上限**：`calcMemoryMaxTokens` 根据全书预估总字数自动计算（`章节数 × 每章字数 / 10`，clamp 到 2000–20000）。超限时 AI 在更新时合并或删除最不重要条目。
+
+**注入机制**：`buildMemoryForLang` 将记忆格式化为 `[第X章] 内容（原文："自动截取片段"）`，注入 `ChapterWriting` 和 `FactCheck` prompt 的 `{{.Memory}}` 占位符。
+
+**同步维护**：`ReviseChapterAction` / `ReviseSpecificChapterAction` 修订章节后删除该章旧记忆并重新提取。
+
 ### 进度持久化
 
 每个关键步骤后立即保存 `progress.json`。API 配置保存 `api.json`，故事配置保存 `config.json`。设定保存 `settings.json`。使用原子写入（先写 `.tmp` 再 rename）。
@@ -474,6 +486,7 @@ pending → writing → review → accepted
 | `BookDiagnosis` | `book_diagnosis` | 全书完稿诊断报告（只诊断不改写） |
 | `BookConsistencyCheck` | `book_consistency_check` | 全书一致性核查（超长书按卷分段） |
 | `BookRoadmap` | `book_roadmap` | 诊断+核查报告 → 结构化工单 JSON |
+| `MemoryUpdate` | `memory_update` | 叙事记忆提取与更新（每章完成后提取大纲未体现的关键细节） |
 
 新增 prompt 模板时需要：(1) 在 `PromptsConfig` 添加字段，(2) 在 `DefaultPrompts` 添加默认值，(3) 在 `applyDefaults` 添加 fallback。
 
@@ -495,6 +508,7 @@ pending → writing → review → accepted
 | `{{.WorldviewContext}}` | `buildWorldviewContext()` | 结构化世界观详情（从 settings 匹配） |
 | `{{.TargetWords}}` | snapshot | 每章目标字数 |
 | `{{.Foreshadows}}` | `formatActiveForeshadowsForChapter()` | 活跃伏笔上下文 |
+| `{{.Memory}}` | `buildMemoryForLang()` | 叙事记忆（早期章节的关键细节，含自动截取的原文片段；无记忆时为空；老模板缺占位符时追加到 prompt 末尾） |
 | `{{.OutlineConstraints}}` | `buildOutlineConstraints()` | 全书章节脉络反向约束（后续 10 章大纲防提前出现 + 前文大纲防一次性事件重复；无内容时为空；老模板缺占位符时追加到 prompt 末尾） |
 
 ## 内置 Skill 文件

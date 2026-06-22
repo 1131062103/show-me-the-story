@@ -72,6 +72,14 @@ type WritingConflict struct {
 	SuggestedActions []ConflictActionOption `json:"suggested_actions"`
 }
 
+type MemoryEntry struct {
+	ID       int    `json:"id"`
+	Content  string `json:"content"`
+	Category string `json:"category"` // character | location | item | event | promise | other
+	Chapter  int    `json:"chapter"`
+	Position int    `json:"position"`
+}
+
 type Progress struct {
 	Phase                       string                   `json:"phase"`
 	Title                       string                   `json:"title"`
@@ -83,6 +91,8 @@ type Progress struct {
 	Foreshadows                 []Foreshadow             `json:"foreshadows,omitempty"`
 	LastForeshadowOutlineReport *ForeshadowOutlineReport `json:"last_foreshadow_outline_report,omitempty"`
 	PendingWritingConflict      *WritingConflict         `json:"pending_writing_conflict,omitempty"`
+	MemoryEntries               []MemoryEntry            `json:"memory_entries,omitempty"`
+	MemoryMaxTokens             int                      `json:"memory_max_tokens,omitempty"`
 }
 
 const (

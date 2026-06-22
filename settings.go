@@ -123,6 +123,16 @@ func (ps *ProjectSettings) nextRelationID() string {
 	return nextID("r", ps.allIDs())
 }
 
+// stripNameMarks removes 「」 wrapping from a name string.
+// "「林小明」" → "林小明", "林小明" → "林小明" (unchanged)
+func stripNameMarks(name string) string {
+	runes := []rune(name)
+	if len(runes) >= 2 && runes[0] == '「' && runes[len(runes)-1] == '」' {
+		return string(runes[1 : len(runes)-1])
+	}
+	return name
+}
+
 func buildCharacterContext(settings *ProjectSettings, chapterOutline string) string {
 	if settings == nil || len(settings.Characters) == 0 {
 		return ""
@@ -130,7 +140,7 @@ func buildCharacterContext(settings *ProjectSettings, chapterOutline string) str
 
 	var relevant []Character
 	for _, c := range settings.Characters {
-		if strings.Contains(chapterOutline, c.Name) {
+		if strings.Contains(chapterOutline, stripNameMarks(c.Name)) {
 			relevant = append(relevant, c)
 		}
 	}

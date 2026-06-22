@@ -9,6 +9,10 @@
   let graph = null;
   let memberEdgeLabel = '';
 
+  function stripNameMarks(name) {
+    return (name.startsWith('「') && name.endsWith('」')) ? name.slice(1, -1) : name;
+  }
+
   class ForceGraph {
     constructor(canvas, data) {
       this.canvas = canvas;
@@ -36,13 +40,13 @@
       const cx = this.canvas.width / 2;
       const cy = this.canvas.height / 2;
       chars.forEach((c, i) => {
-        this.nodes.push({ id: c.id, label: c.name, type: 'character', x: cx + Math.cos(i * 2) * 180, y: cy + Math.sin(i * 2) * 180, vx: 0, vy: 0, r: 28 });
+        this.nodes.push({ id: c.id, label: stripNameMarks(c.name), type: 'character', x: cx + Math.cos(i * 2) * 180, y: cy + Math.sin(i * 2) * 180, vx: 0, vy: 0, r: 28 });
       });
       wvs.forEach((w, i) => {
-        this.nodes.push({ id: w.id, label: w.name, type: 'worldview', x: cx + Math.cos(i * 2 + 1) * 240, y: cy + Math.sin(i * 2 + 1) * 240, vx: 0, vy: 0, r: 24 });
+        this.nodes.push({ id: w.id, label: stripNameMarks(w.name), type: 'worldview', x: cx + Math.cos(i * 2 + 1) * 240, y: cy + Math.sin(i * 2 + 1) * 240, vx: 0, vy: 0, r: 24 });
       });
       orgs.forEach((o, i) => {
-        this.nodes.push({ id: o.id, label: o.name, type: 'organization', x: cx + Math.cos(i * 2 + 2) * 300, y: cy + Math.sin(i * 2 + 2) * 300, vx: 0, vy: 0, r: 26 });
+        this.nodes.push({ id: o.id, label: stripNameMarks(o.name), type: 'organization', x: cx + Math.cos(i * 2 + 2) * 300, y: cy + Math.sin(i * 2 + 2) * 300, vx: 0, vy: 0, r: 26 });
       });
       (data.relations || []).forEach(r => {
         this.edges.push({ source: r.source_id, target: r.target_id, label: r.label });

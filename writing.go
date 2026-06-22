@@ -137,7 +137,7 @@ func GenerateChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, 
 	// 写前检查：本章大纲若已与实际写出的剧情冲突（如大纲安排初遇但前文已认识），
 	// 先最小化修订大纲再动笔，避免按过时大纲写出矛盾内容。
 	if i > 0 {
-		logger.StepInfo(1, 5, "正在检查本章大纲与当前剧情的一致性...")
+		logger.StepInfo(1, 6, "正在检查本章大纲与当前剧情的一致性...")
 		revised, err := checkOutlineConsistency(ctx, apiCfg, cfg, state, i, logger)
 		if err != nil {
 			logger.WarnKey("log.outline_check_failed", err)
@@ -163,7 +163,7 @@ func GenerateChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, 
 		if ctx.Err() != nil {
 			return fmt.Errorf("任务已取消")
 		}
-		logger.StepInfo(2, 5, "正在构思并撰写正文...")
+		logger.StepInfo(2, 6, "正在构思并撰写正文...")
 		content := generateChapterContentStreamWithRetryLog(ctx, apiCfg, cfg, state, i, settings, extraConstraints, logger)
 		if content == "" {
 			return fmt.Errorf("正文生成失败或被取消")
@@ -171,7 +171,7 @@ func GenerateChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, 
 		ch.Content = content
 		logger.InfoKey("log.prose_done", len([]rune(content)))
 
-		logger.StepInfo(3, 5, "正在提炼本章摘要...")
+		logger.StepInfo(3, 6, "正在提炼本章摘要...")
 		summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, content, logger)
 		if summary == "" {
 			return fmt.Errorf("摘要提炼失败或被取消")
@@ -179,7 +179,7 @@ func GenerateChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, 
 		ch.Summary = summary
 		logger.InfoKey("log.summary_done")
 
-		logger.StepInfo(4, 5, "正在对本章进行事实核查...")
+		logger.StepInfo(4, 6, "正在对本章进行事实核查...")
 		historySummary := buildHistorySummary(state, i)
 		factCheckResult := generateChapterFactCheckWithRetryLog(ctx, apiCfg, cfg, state, i, content, historySummary, logger)
 
@@ -239,9 +239,12 @@ func GenerateChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, 
 	state.PendingWritingConflict = nil
 
 	if len(state.Foreshadows) > 0 {
-		logger.StepInfo(5, 5, "正在更新伏笔状态...")
+		logger.StepInfo(5, 6, "正在更新伏笔状态...")
 		syncForeshadowsAfterChapter(ctx, apiCfg, cfg, state, i, progressPath, logger)
 	}
+
+	logger.StepInfo(6, 6, "正在维护叙事记忆...")
+	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, i, progressPath, logger)
 
 	SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
 
@@ -390,6 +393,8 @@ func ReviseChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, st
 		}
 	}
 
+	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, chapterIdx, progressPath, logger)
+
 	logger.SuccessKey("log.chapter_revised")
 	return nil
 }
@@ -453,6 +458,8 @@ func ReviseSpecificChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Co
 		}
 	}
 
+	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, chapterIdx, progressPath, logger)
+
 	logger.SuccessKey("log.chapter_specific_done", ch.Num)
 	return nil
 }
@@ -493,6 +500,7 @@ func generateChapterContentStream(ctx context.Context, apiCfg *APIConfig, cfg *C
 	characterContext := buildCharacterContextForLang(settings, ch.Outline, lang)
 	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang)
 	outlineConstraints := buildOutlineConstraintsForLang(state, idx, lang)
+	memoryContext := buildMemoryForLang(state, idx, lang)
 
 	userPrompt := RenderPrompt(cfg.Prompts.ChapterWriting, map[string]string{
 		"Title":              preferUserValue(cfg.Story.Title, state.Title),
@@ -509,10 +517,12 @@ func generateChapterContentStream(ctx context.Context, apiCfg *APIConfig, cfg *C
 		"WorldviewContext":   worldviewContext,
 		"TargetWords":        fmt.Sprintf("%d", snapshot.TargetWordsPerChapter),
 		"Foreshadows":        foreshadowContext,
+		"Memory":             memoryContext,
 		"OutlineConstraints": outlineConstraints,
 	})
 	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterWriting, userPrompt, "{{.OutlineConstraints}}", outlineConstraints)
 	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterWriting, userPrompt, "{{.Foreshadows}}", foreshadowContext)
+	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterWriting, userPrompt, "{{.Memory}}", memoryContext)
 	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterWriting, userPrompt, "{{.WritingPOV}}", formatWritingPOVBlock(cfg.Story.WritingPOV, lang))
 	if block := formatExtraWritingConstraintsBlock(extraWritingConstraints, lang); block != "" {
 		userPrompt += "\n\n" + block
@@ -601,6 +611,7 @@ func generateChapterFactCheck(ctx context.Context, apiCfg *APIConfig, cfg *Confi
 	ch := state.Chapters[idx]
 	lang := cfg.Language
 	outlineConstraints := buildOutlineConstraintsForLang(state, idx, lang)
+	memoryContext := buildMemoryForLang(state, idx, lang)
 
 	userPrompt := RenderPrompt(cfg.Prompts.FactCheck, map[string]string{
 		"ChapterContent":     content,
@@ -608,6 +619,7 @@ func generateChapterFactCheck(ctx context.Context, apiCfg *APIConfig, cfg *Confi
 		"CorePrompt":         "",
 		"ChapterOutline":     ch.Outline,
 		"OutlineConstraints": outlineConstraints,
+		"Memory":             memoryContext,
 	})
 	// Old-template fallback: if placeholder is missing, append the material and supplementary checks at the end.
 	if NormalizeLanguage(lang) == LangEN {
@@ -617,12 +629,18 @@ func generateChapterFactCheck(ctx context.Context, apiCfg *APIConfig, cfg *Confi
 			userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.OutlineConstraints}}",
 				outlineConstraints+"Supplementary audit scope (also count as reportable objective contradictions): (a) premature introduction of characters/events scheduled for later chapters per the outline; (b) one-time events from prior chapters (first meetings, identity reveals, etc.) being re-enacted as new in this chapter.")
 		}
+		if memoryContext != "" {
+			userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.Memory}}", memoryContext)
+		}
 	} else {
 		userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.ChapterOutline}}",
 			"【本章大纲】\n"+ch.Outline)
 		if outlineConstraints != "" {
 			userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.OutlineConstraints}}",
 				outlineConstraints+"补充核查范围（同样属于必须报告的客观矛盾）：(a) 提前引入按章节脉络安排在后续章节才登场或发生的人物/事件；(b) 前文已发生的一次性事件（初次见面、身份揭示等）在本章作为新事件重复发生。")
+		}
+		if memoryContext != "" {
+			userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.Memory}}", memoryContext)
 		}
 	}
 
@@ -955,4 +973,133 @@ func PolishChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, st
 	}
 
 	return nil
+}
+
+// calcMemoryMaxTokens calculates the memory token budget based on total estimated word count.
+func calcMemoryMaxTokens(chapterCount, targetWordsPerChapter int) int {
+	totalWords := chapterCount * targetWordsPerChapter
+	tokens := totalWords / 10
+	if tokens < 2000 {
+		tokens = 2000
+	}
+	if tokens > 20000 {
+		tokens = 20000
+	}
+	return tokens
+}
+
+// nextMemoryID returns the next available memory entry ID.
+func nextMemoryID(entries []MemoryEntry) int {
+	maxID := 0
+	for _, m := range entries {
+		if m.ID > maxID {
+			maxID = m.ID
+		}
+	}
+	return maxID + 1
+}
+
+// syncMemoryAfterChapter extracts narrative memory from a chapter and updates the memory store.
+// For revised chapters, old memories from that chapter are automatically deleted before re-extraction.
+func syncMemoryAfterChapter(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, idx int, progressPath string, logger *LogBroadcaster) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	ch := state.Chapters[idx]
+	lang := cfg.Language
+
+	if state.MemoryMaxTokens <= 0 {
+		snapshot := state.StoryConfigSnapshot
+		if snapshot == nil {
+			snapshot = &cfg.Story
+		}
+		state.MemoryMaxTokens = calcMemoryMaxTokens(snapshot.ChapterCount, snapshot.TargetWordsPerChapter)
+	}
+
+	// Delete old memories from this chapter (for revised chapters)
+	var filtered []MemoryEntry
+	for _, m := range state.MemoryEntries {
+		if m.Chapter != ch.Num {
+			filtered = append(filtered, m)
+		}
+	}
+	state.MemoryEntries = filtered
+
+	existingMemory := formatMemoryForUpdatePrompt(state.MemoryEntries, lang)
+
+	userPrompt := RenderPrompt(cfg.Prompts.MemoryUpdate, map[string]string{
+		"Title":           preferUserValue(cfg.Story.Title, state.Title),
+		"ChapterNum":      fmt.Sprintf("%d", ch.Num),
+		"ChapterTitle":    ch.Title,
+		"ChapterOutline":  ch.Outline,
+		"ChapterContent":  ch.Content,
+		"ExistingMemory":  existingMemory,
+		"MemoryMaxTokens": fmt.Sprintf("%d", state.MemoryMaxTokens),
+	})
+
+	systemPrompt := SystemPromptFor(lang, "memory_manager")
+	if systemPrompt == "" {
+		systemPrompt = "你是一位精准的小说叙事记忆管理员。"
+	}
+
+	result := CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)
+
+	newMemories, updates, err := parseMemoryUpdateResult(result)
+	if err != nil {
+		logger.InfoKey("log.memory_update_failed")
+		return
+	}
+
+	for _, u := range updates {
+		if u.Action == "delete" {
+			for j := len(state.MemoryEntries) - 1; j >= 0; j-- {
+				if state.MemoryEntries[j].ID == u.ID {
+					state.MemoryEntries = append(state.MemoryEntries[:j], state.MemoryEntries[j+1:]...)
+					break
+				}
+			}
+		}
+	}
+
+	for _, nm := range newMemories {
+		entry := MemoryEntry{
+			ID:       nextMemoryID(state.MemoryEntries),
+			Content:  nm.Content,
+			Category: nm.Category,
+			Chapter:  ch.Num,
+			Position: nm.Position,
+		}
+		state.MemoryEntries = append(state.MemoryEntries, entry)
+	}
+
+	if err := SaveProgress(progressPath, state); err != nil {
+		logger.InfoKey("log.memory_save_failed")
+	}
+}
+
+type memoryNewEntry struct {
+	Content  string `json:"content"`
+	Category string `json:"category"`
+	Position int    `json:"position"`
+}
+
+type memoryUpdateEntry struct {
+	ID     int    `json:"id"`
+	Action string `json:"action"`
+}
+
+type memoryUpdateResult struct {
+	NewMemories []memoryNewEntry    `json:"new_memories"`
+	Updates     []memoryUpdateEntry `json:"updates"`
+}
+
+// parseMemoryUpdateResult parses the AI response for memory update.
+func parseMemoryUpdateResult(result string) ([]memoryNewEntry, []memoryUpdateEntry, error) {
+	cleaned := cleanJSONResponse(result)
+	var parsed memoryUpdateResult
+	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
+		return nil, nil, err
+	}
+	return parsed.NewMemories, parsed.Updates, nil
 }

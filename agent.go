@@ -692,7 +692,7 @@ func getBuiltinTools() []Tool {
 				}
 
 				for _, c := range ctx.Settings.Characters {
-					if c.ID == params.ID || c.Name == params.ID {
+					if c.ID == params.ID || c.Name == params.ID || stripNameMarks(c.Name) == params.ID {
 						data, _ := json.MarshalIndent(c, "", "  ")
 						return string(data), nil
 					}
@@ -926,7 +926,7 @@ func getBuiltinTools() []Tool {
 				}
 
 				for i, c := range ctx.Settings.Characters {
-					if c.ID == params.ID || c.Name == params.ID {
+					if c.ID == params.ID || c.Name == params.ID || stripNameMarks(c.Name) == params.ID {
 						if params.Name != "" {
 							ctx.Settings.Characters[i].Name = params.Name
 						}
@@ -976,7 +976,7 @@ func getBuiltinTools() []Tool {
 				json.Unmarshal(args, &params)
 
 				for i, c := range ctx.Settings.Characters {
-					if c.ID == params.ID || c.Name == params.ID {
+					if c.ID == params.ID || c.Name == params.ID || stripNameMarks(c.Name) == params.ID {
 						ctx.Settings.Characters = append(ctx.Settings.Characters[:i], ctx.Settings.Characters[i+1:]...)
 						if err := SaveProjectSettings(ctx.SettingsPath, ctx.Settings); err != nil {
 							return "", agentErr(ctx, "save_failed", err)

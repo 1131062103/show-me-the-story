@@ -454,6 +454,14 @@ var messageCatalog = map[string]map[string]string{
 		LangZH: "伏笔状态已更新（活跃: %d, 已回收: %d）",
 		LangEN: "Foreshadow status updated (active: %d, resolved: %d)",
 	},
+	"log.memory_update_failed": {
+		LangZH: "叙事记忆更新失败（不影响本章）",
+		LangEN: "Narrative memory update failed (chapter unaffected)",
+	},
+	"log.memory_save_failed": {
+		LangZH: "叙事记忆保存失败",
+		LangEN: "Failed to save narrative memory",
+	},
 	"log.postprocess_material": {
 		LangZH: "全书材料：约 %d 字，预估 %d tokens，诊断模式：%s",
 		LangEN: "Book material: ~%d chars, ~%d tokens, diagnosis mode: %s",

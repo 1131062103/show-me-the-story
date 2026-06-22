@@ -66,6 +66,7 @@ type PromptsConfig struct {
 	BookDiagnosis                 string `json:"book_diagnosis"`
 	BookConsistencyCheck          string `json:"book_consistency_check"`
 	BookRoadmap                   string `json:"book_roadmap"`
+	MemoryUpdate                  string `json:"memory_update"`
 }
 
 func DefaultAPIConfig() *APIConfig {
@@ -248,6 +249,9 @@ func (p *PromptsConfig) applyDefaults(lang string) {
 	}
 	if p.BookRoadmap == "" {
 		p.BookRoadmap = defaults.BookRoadmap
+	}
+	if p.MemoryUpdate == "" {
+		p.MemoryUpdate = defaults.MemoryUpdate
 	}
 }
 

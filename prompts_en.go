@@ -42,7 +42,7 @@ Rules:
 [Story-so-far (rolling recap of recent chapters — continue from this state strictly)]
 {{.HistorySummary}}
 
-{{.PreviousEnding}}{{.Foreshadows}}{{.OutlineConstraints}}[Task for this chapter]
+{{.PreviousEnding}}{{.Foreshadows}}{{.Memory}}{{.OutlineConstraints}}[Task for this chapter]
 Chapter title: "{{.ChapterTitle}}"
 Outline: {{.ChapterOutline}}
 
@@ -114,7 +114,7 @@ Check whether the chapter below contradicts the story-so-far or the outline arc.
 [Chapter outline]
 {{.ChapterOutline}}
 
-{{.OutlineConstraints}}[Chapter under review]
+{{.OutlineConstraints}}{{.Memory}}[Chapter under review]
 {{.ChapterContent}}
 
 Scope (only the following count as problems, nothing else):
@@ -519,4 +519,49 @@ Do not rewrite the prose, only describe the fix.`,
 [Output format]
 JSON only, nothing else:
 {"items": [{"chapter_num": 1, "type": "logic", "priority": "P0", "feedback": "concrete revision instruction", "selected": true}]}`,
+
+	MemoryUpdate: `You are a precise narrative memory manager for a novel. Your task is to extract key narrative details from the latest chapter and maintain a cross-chapter long-term memory store.
+
+The memory store bridges the gap left by the rolling summary (which only covers the last 5 chapters) — recording specific details that outlines and summaries do not capture but that matter for future writing.
+
+[Novel title] {{.Title}}
+[Chapter number] Chapter {{.ChapterNum}}
+[Chapter title] {{.ChapterTitle}}
+
+[Chapter outline]
+{{.ChapterOutline}}
+
+[Chapter prose]
+{{.ChapterContent}}
+
+[Existing memory store]
+{{.ExistingMemory}}
+
+[Memory token budget] {{.MemoryMaxTokens}} tokens
+
+Extraction rules:
+1. Only extract **specific narrative details NOT in the outline** — high-level plot points already in the outline do not need memorising.
+2. Focus on these categories:
+   - character: speech tics, habits, appearance details, subtle emotional shifts
+   - location: place names, scene layout, environmental features
+   - item: key props, keepsakes, their appearance and backstory
+   - event: specific promises, agreements, or information exchanged in dialogue
+   - promise: commitments a character made to others or themselves, unfinished obligations
+   - other: any other detail with narrative continuity value
+3. Each memory is a single sentence, with the approximate paragraph number in the original chapter (1-indexed, split by paragraph breaks).
+4. If an existing memory entry is superseded or contradicted by this chapter, mark it for deletion in updates.
+5. If the total memory exceeds the token budget (~{{.MemoryMaxTokens}} tokens), merge or remove the least important entries in the response.
+
+Return JSON:
+{
+  "new_memories": [
+    {"content": "memory description", "category": "category", "position": paragraph_number}
+  ],
+  "updates": [
+    {"id": existing_memory_id, "action": "delete", "reason": "reason for deletion"}
+  ]
+}
+
+Only return entries that changed. If this chapter has no memorable new details, return {"new_memories": [], "updates": []}.
+Return JSON only, nothing else.`,
 }

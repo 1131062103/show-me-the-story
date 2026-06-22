@@ -6,6 +6,10 @@
 
   export let sendToChat = async () => {};
 
+  function stripNameMarks(name) {
+    return (name.startsWith('「') && name.endsWith('」')) ? name.slice(1, -1) : name;
+  }
+
   let showCharForm = false;
   let showWvForm = false;
   let charCollapse = false;
@@ -479,9 +483,9 @@
           {:else}
             {#each chars as c}
               <div class="flex items-start gap-2.5 bg-base-300 rounded-lg p-2.5 group">
-                <div class="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold shrink-0">{c.name[0]}</div>
+                <div class="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold shrink-0">{stripNameMarks(c.name)[0]}</div>
                 <div class="flex-1 min-w-0">
-                  <div class="text-sm font-medium truncate">{c.name}</div>
+                  <div class="text-sm font-medium truncate">{stripNameMarks(c.name)}</div>
                   <div class="text-xs text-base-content/40 line-clamp-1">{c.personality || c.background || c.age || ''}</div>
                 </div>
                 <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
