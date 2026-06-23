@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import { addLog, addToast, config, progress, taskRunning, streamingContent, streamingChapterIdx, taskTokenUsage, continueAnalysis, currentChatSession, settings, chatSessions, lastFailedTask, currentTaskName, logEntries, postprocess, foreshadowSuggestions, foreshadowShowSuggestions, pendingConfigChanges, showConfigChangePanel } from './stores.js';
 import { api } from './api.js';
 import { getLocale, translate, formatLogEntry, formatToolResult } from './i18n/index.js';
+import { TOKEN_POLL_INTERVAL_MS } from './tokenPoll.js';
 
 let eventSource = null;
 let reconnectTimer = null;
@@ -61,7 +62,7 @@ function refreshTokenUsage() {
 function startTokenPoll() {
   stopTokenPoll();
   refreshTokenUsage();
-  tokenPollTimer = setInterval(refreshTokenUsage, 2000);
+  tokenPollTimer = setInterval(refreshTokenUsage, TOKEN_POLL_INTERVAL_MS);
 }
 
 function stopTokenPoll() {
@@ -156,6 +157,10 @@ export function connectSSE() {
     }
 
     if (d.task === 'chat_message') {
+      // 异步工具（如 generate_outline）会启动子任务，taskCount 仍 > 0，
+      // 上方 taskCount<=0 分支不会 clearChatBuf；须在此取消 chat_chunk 延迟 flush，
+      // 否则 reload 后的 messages 与 streaming_text 会各显示一遍相同 reply。
+      clearChatBuf();
       let sessionId = null;
       currentChatSession.update(s => {
         if (!s) return s;
