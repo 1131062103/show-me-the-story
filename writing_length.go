@@ -10,9 +10,16 @@ const (
 	chapterLengthToleranceAbsolute = 1000
 	chapterLengthTolerancePercent  = 15
 	chapterGenMaxLengthAttempts    = 1 // initial draft + one rewrite, then compress/expand
+
+	chapterLengthSoftOverflowAbsolute = 200 // soft keep: within max(±200, ±5%) of bound
+	chapterLengthSoftOverflowPercent  = 5
+	chapterLengthAdjustMaxOverRatio   = 120 // skip compress when actual > max * 1.2
+	chapterLengthAdjustMinUnderRatio  = 80  // skip expand when actual < min * 0.8
 )
 
-// calcChapterLengthRange returns acceptable chapter prose length bounds (runes/characters).
+const proseLengthOutOfRangeBase = 1_000_000
+
+// calcChapterLengthRange returns acceptable chapter prose length bounds (prose units).
 // Tolerance is max(±1000, ±15% of target). ponytail: fixed policy; tune constants if needed.
 func calcChapterLengthRange(targetWordsPerChapter int) (minLen, maxLen int) {
 	if targetWordsPerChapter < 1 {
@@ -33,6 +40,61 @@ func calcChapterLengthRange(targetWordsPerChapter int) (minLen, maxLen int) {
 func chapterLengthInRange(content string, minLen, maxLen int) bool {
 	n := countProseUnits(content)
 	return n >= minLen && n <= maxLen
+}
+
+// proseLengthScore ranks drafts: lower is better. In-range drafts beat any out-of-range;
+// in-range ties break by distance to target; out-of-range by distance to nearest bound.
+func proseLengthScore(actual, minLen, maxLen, target int) int {
+	if actual >= minLen && actual <= maxLen {
+		diff := actual - target
+		if diff < 0 {
+			diff = -diff
+		}
+		return diff
+	}
+	if actual > maxLen {
+		return proseLengthOutOfRangeBase + (actual - maxLen)
+	}
+	return proseLengthOutOfRangeBase + (minLen - actual)
+}
+
+func softLengthTolerance(boundary int) int {
+	tol := chapterLengthSoftOverflowAbsolute
+	if pct := boundary * chapterLengthSoftOverflowPercent / 100; pct > tol {
+		tol = pct
+	}
+	return tol
+}
+
+func isSoftLengthDeviation(actual, minLen, maxLen int) bool {
+	if actual > maxLen {
+		return actual-maxLen <= softLengthTolerance(maxLen)
+	}
+	if actual < minLen {
+		return minLen-actual <= softLengthTolerance(minLen)
+	}
+	return false
+}
+
+func shouldAttemptLengthAdjust(actual, minLen, maxLen int) bool {
+	if actual >= minLen && actual <= maxLen {
+		return false
+	}
+	if isSoftLengthDeviation(actual, minLen, maxLen) {
+		return false
+	}
+	if actual > maxLen {
+		return actual <= maxLen*chapterLengthAdjustMaxOverRatio/100
+	}
+	return actual >= minLen*chapterLengthAdjustMinUnderRatio/100
+}
+
+func maybeUpdateBestDraft(bestContent *string, bestScore *int, content string, minLen, maxLen, target int) {
+	score := proseLengthScore(countProseUnits(content), minLen, maxLen, target)
+	if *bestContent == "" || score < *bestScore {
+		*bestContent = content
+		*bestScore = score
+	}
 }
 
 func formatChapterLengthRequirementBlock(minLen, maxLen, target int, lang string) string {
@@ -125,26 +187,80 @@ Output ONLY the full revised chapter prose.
 	return stripChapterMetaProse(raw, lang), nil
 }
 
+func recoverChapterLengthBest(ctx context.Context, apiCfg *APIConfig, cfg *Config, bestContent string, minLen, maxLen, target int, bestScore int, logger *LogBroadcaster) (string, error) {
+	if bestContent == "" {
+		return "", fmt.Errorf("正文生成失败或被取消")
+	}
+	actual := countProseUnits(bestContent)
+	if chapterLengthInRange(bestContent, minLen, maxLen) {
+		return bestContent, nil
+	}
+	if isSoftLengthDeviation(actual, minLen, maxLen) {
+		if logger != nil {
+			logger.WarnKey("log.chapter_length_soft_keep", actual, minLen, maxLen)
+			logger.WarnKey("log.chapter_length_off_range", actual, minLen, maxLen)
+		}
+		return bestContent, nil
+	}
+	if !shouldAttemptLengthAdjust(actual, minLen, maxLen) {
+		if logger != nil {
+			logger.WarnKey("log.chapter_length_skip_adjust", actual, minLen, maxLen)
+			logger.WarnKey("log.chapter_length_off_range", actual, minLen, maxLen)
+		}
+		return bestContent, nil
+	}
+	if logger != nil {
+		logger.WarnKey("log.chapter_length_adjust", actual, minLen, maxLen)
+	}
+	adjusted, err := adjustChapterLength(ctx, apiCfg, cfg, bestContent, minLen, maxLen, logger)
+	if err != nil || adjusted == "" {
+		if logger != nil {
+			logger.WarnKey("log.chapter_length_adjust_failed", err)
+			logger.WarnKey("log.chapter_length_off_range", actual, minLen, maxLen)
+		}
+		return bestContent, nil
+	}
+	adjustedLen := countProseUnits(adjusted)
+	if chapterLengthInRange(adjusted, minLen, maxLen) {
+		return adjusted, nil
+	}
+	adjustedScore := proseLengthScore(adjustedLen, minLen, maxLen, target)
+	if adjustedScore >= bestScore {
+		if logger != nil {
+			logger.WarnKey("log.chapter_length_adjust_reverted", adjustedLen, actual, minLen, maxLen)
+			logger.WarnKey("log.chapter_length_off_range", actual, minLen, maxLen)
+		}
+		return bestContent, nil
+	}
+	if logger != nil {
+		logger.WarnKey("log.chapter_length_off_range", adjustedLen, minLen, maxLen)
+	}
+	return adjusted, nil
+}
+
 func generateChapterContentWithLengthControl(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, idx int, settings *ProjectSettings, extraWritingConstraints string, logger *LogBroadcaster) (string, error) {
 	snapshot := state.StoryConfigSnapshot
 	if snapshot == nil {
 		snapshot = &cfg.Story
 	}
-	minLen, maxLen := calcChapterLengthRange(snapshot.TargetWordsPerChapter)
+	target := snapshot.TargetWordsPerChapter
+	minLen, maxLen := calcChapterLengthRange(target)
 	lang := cfg.Language
 	lengthFeedback := ""
-	var content string
+	var bestContent string
+	bestScore := int(^uint(0) >> 1)
 
 	for attempt := 0; attempt <= chapterGenMaxLengthAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("任务已取消")
 		}
 		constraints := mergeWritingConstraints(extraWritingConstraints, lengthFeedback)
-		content = generateChapterContentStreamWithRetryLog(ctx, apiCfg, cfg, state, idx, settings, constraints, logger)
+		content := generateChapterContentStreamWithRetryLog(ctx, apiCfg, cfg, state, idx, settings, constraints, logger)
 		if content == "" {
 			return "", fmt.Errorf("正文生成失败或被取消")
 		}
 		actualLen := countProseUnits(content)
+		maybeUpdateBestDraft(&bestContent, &bestScore, content, minLen, maxLen, target)
 		if chapterLengthInRange(content, minLen, maxLen) {
 			return content, nil
 		}
@@ -155,27 +271,7 @@ func generateChapterContentWithLengthControl(ctx context.Context, apiCfg *APICon
 			lengthFeedback = formatChapterLengthRetryFeedback(actualLen, minLen, maxLen, lang)
 			continue
 		}
-		break
 	}
 
-	actualLen := countProseUnits(content)
-	if logger != nil {
-		logger.WarnKey("log.chapter_length_adjust", actualLen, minLen, maxLen)
-	}
-	adjusted, err := adjustChapterLength(ctx, apiCfg, cfg, content, minLen, maxLen, logger)
-	if err != nil || adjusted == "" {
-		if logger != nil {
-			logger.WarnKey("log.chapter_length_adjust_failed", err)
-			logger.WarnKey("log.chapter_length_off_range", actualLen, minLen, maxLen)
-		}
-		return content, nil
-	}
-	adjustedLen := countProseUnits(adjusted)
-	if chapterLengthInRange(adjusted, minLen, maxLen) {
-		return adjusted, nil
-	}
-	if logger != nil {
-		logger.WarnKey("log.chapter_length_off_range", adjustedLen, minLen, maxLen)
-	}
-	return adjusted, nil
+	return recoverChapterLengthBest(ctx, apiCfg, cfg, bestContent, minLen, maxLen, target, bestScore, logger)
 }

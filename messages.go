@@ -315,8 +315,20 @@ var messageCatalog = map[string]map[string]string{
 		LangEN: "[Length] Still %d chars after rewrite (need %d–%d) — compressing/expanding draft...",
 	},
 	"log.chapter_length_adjust_failed": {
-		LangZH: "[字数控制] 压缩/扩展失败: %v，保留重写稿",
-		LangEN: "[Length] Compress/expand failed: %v — keeping rewritten draft",
+		LangZH: "[字数控制] 压缩/扩展失败: %v，保留最佳稿",
+		LangEN: "[Length] Compress/expand failed: %v — keeping best draft",
+	},
+	"log.chapter_length_soft_keep": {
+		LangZH: "[字数控制] 最佳稿 %d 字略超/略低于 %d–%d 字，在容忍范围内，跳过压缩/扩展",
+		LangEN: "[Length] Best draft %d chars is slightly outside %d–%d — within soft tolerance, skipping adjust",
+	},
+	"log.chapter_length_skip_adjust": {
+		LangZH: "[字数控制] 最佳稿 %d 字偏离 %d–%d 字过多，跳过压缩/扩展",
+		LangEN: "[Length] Best draft %d chars too far from %d–%d — skipping adjust",
+	},
+	"log.chapter_length_adjust_reverted": {
+		LangZH: "[字数控制] 压缩/扩展后 %d 字未优于最佳稿 %d 字（要求 %d–%d 字），保留最佳稿",
+		LangEN: "[Length] After adjust %d chars not better than best %d (need %d–%d) — keeping best draft",
 	},
 	"log.chapter_length_off_range": {
 		LangZH: "[字数控制] 压缩/扩展后仍为 %d 字（要求 %d–%d 字），请用户在审核时处理；自动确认模式下将继续下一章",
