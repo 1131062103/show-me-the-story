@@ -42,17 +42,45 @@ type ChatResponse struct {
 	Usage *tokenUsage `json:"usage,omitempty"`
 }
 
-func normalizeURL(base string) string {
-	base = strings.TrimSpace(base)
-	base = strings.TrimSuffix(base, "/")
-
-	if !strings.HasSuffix(base, "/v1") && !strings.Contains(base, "/v1/") {
-		if !strings.Contains(base, "11434") {
-			base = base + "/v1"
+func hasAPIVersionSegment(u string) bool {
+	for _, seg := range strings.Split(u, "/") {
+		if len(seg) >= 2 && seg[0] == 'v' && seg[1] >= '0' && seg[1] <= '9' {
+			return true
 		}
 	}
+	return false
+}
 
-	return base + "/chat/completions"
+// resolveChatCompletionsURL builds the POST endpoint from base_url and url_strict.
+// Must stay in sync with frontend/src/lib/apiUrl.js.
+func resolveChatCompletionsURL(base string, strict bool) string {
+	base = strings.TrimSpace(base)
+	base = strings.TrimSuffix(base, "/")
+	if base == "" {
+		return ""
+	}
+	if strings.HasSuffix(base, "/chat/completions") {
+		return base
+	}
+	if strict {
+		return base + "/chat/completions"
+	}
+	if hasAPIVersionSegment(base) {
+		return base + "/chat/completions"
+	}
+	return base + "/v1/chat/completions"
+}
+
+func resolveAPIBase(base string, strict bool) string {
+	u := resolveChatCompletionsURL(base, strict)
+	return strings.TrimSuffix(u, "/chat/completions")
+}
+
+func normalizeURL(apiCfg *APIConfig) string {
+	if apiCfg == nil {
+		return ""
+	}
+	return resolveChatCompletionsURL(apiCfg.BaseURL, apiCfg.URLStrict)
 }
 
 // FetchModelContextWindow 从 API 的 /models 端点获取指定模型的上下文窗口大小。
@@ -61,14 +89,7 @@ func FetchModelContextWindow(apiCfg *APIConfig) int {
 	if apiCfg == nil || strings.TrimSpace(apiCfg.BaseURL) == "" || strings.TrimSpace(apiCfg.Model) == "" {
 		return 0
 	}
-	base := strings.TrimSpace(apiCfg.BaseURL)
-	base = strings.TrimSuffix(base, "/")
-	if !strings.HasSuffix(base, "/v1") && !strings.Contains(base, "/v1/") {
-		if !strings.Contains(base, "11434") {
-			base = base + "/v1"
-		}
-	}
-	modelsURL := base + "/models/" + apiCfg.Model
+	modelsURL := resolveAPIBase(apiCfg.BaseURL, apiCfg.URLStrict) + "/models/" + apiCfg.Model
 
 	req, err := http.NewRequest("GET", modelsURL, nil)
 	if err != nil {
@@ -165,7 +186,7 @@ func CallAPIMessages(ctx context.Context, apiCfg *APIConfig, messages []Message)
 
 // callAPIMessagesSync 同步 HTTP 调用（仅作流式失败时的回退）。
 func callAPIMessagesSync(ctx context.Context, apiCfg *APIConfig, messages []Message) (string, error) {
-	fullURL := normalizeURL(apiCfg.BaseURL)
+	fullURL := normalizeURL(apiCfg)
 	tracker := taskTokensFromContext(ctx)
 	tracker.beginCall(messages)
 
@@ -303,7 +324,7 @@ func CallAPIStream(ctx context.Context, apiCfg *APIConfig, system, user string, 
 
 // CallAPIStreamMessages 以完整的多轮消息数组调用 API（流式）。
 func CallAPIStreamMessages(ctx context.Context, apiCfg *APIConfig, messages []Message, onChunk func(string)) (string, error) {
-	fullURL := normalizeURL(apiCfg.BaseURL)
+	fullURL := normalizeURL(apiCfg)
 	tracker := taskTokensFromContext(ctx)
 	tracker.beginCall(messages)
 

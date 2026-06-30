@@ -279,6 +279,9 @@ export default {
   // ---- Config page ----
   'config.api.title': 'API config',
   'config.api.baseUrl': 'API base URL',
+  'config.api.urlStrict': 'Strict URL mode',
+  'config.api.urlStrictHint': 'When enabled, /v1 is not added; only /chat/completions is appended.',
+  'config.api.resolvedUrl': 'Resolved endpoint',
   'config.api.model': 'Model',
   'config.api.timeout': 'HTTP timeout (s)',
   'config.api.maxTokens': 'Max output tokens',

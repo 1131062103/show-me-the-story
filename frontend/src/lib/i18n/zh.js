@@ -283,6 +283,9 @@ export default {
   // ---- Config page ----
   'config.api.title': 'API 配置',
   'config.api.baseUrl': 'API Base URL',
+  'config.api.urlStrict': '严格 URL 模式',
+  'config.api.urlStrictHint': '开启后不会自动插入 /v1，仅在末尾补 /chat/completions。',
+  'config.api.resolvedUrl': '实际请求地址',
   'config.api.model': 'Model',
   'config.api.timeout': 'HTTP 超时（秒）',
   'config.api.maxTokens': '最大输出 Tokens',

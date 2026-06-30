@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js';
   import { apiConfig, config, progress, settings, editingCharID, editingWvID, wvFilter, addToast, showConfirm, taskRunning } from '../lib/stores.js';
   import { t } from '../lib/i18n/index.js';
+  import { resolveChatCompletionsURL } from '../lib/apiUrl.js';
   import ConfigChangePanel from '../components/ConfigChangePanel.svelte';
 
   export let sendToChat = async () => {};
@@ -35,9 +36,11 @@
   $: cfgKey = $apiConfig?.api_key || '';
   $: cfgTimeout = $apiConfig?.http_timeout_seconds || 300;
 
-  let localApiCfg = { base_url: '', model: '', api_key: '', http_timeout_seconds: 300, max_tokens: 0, context_budget_tokens: 900000 };
+  let localApiCfg = { base_url: '', url_strict: false, model: '', api_key: '', http_timeout_seconds: 300, max_tokens: 0, context_budget_tokens: 900000 };
   let localStoryCfg = { type: '', title: '', chapter_count: 30, target_words_per_chapter: 2500, writing_style: '', writing_pov: '', story_synopsis: '' };
   let testingApi = false;
+
+  $: resolvedChatURL = resolveChatCompletionsURL(localApiCfg.base_url, !!localApiCfg.url_strict);
 
   let apiCfgSnapshot = '';
   let storyCfgSnapshot = '';
@@ -45,7 +48,11 @@
   $: if ($apiConfig) {
     const snap = JSON.stringify($apiConfig);
     if (snap !== apiCfgSnapshot) {
-      localApiCfg = { ...$apiConfig };
+      localApiCfg = {
+        base_url: '', url_strict: false, model: '', api_key: '', http_timeout_seconds: 300, max_tokens: 0, context_budget_tokens: 900000,
+        ...$apiConfig,
+        url_strict: !!$apiConfig.url_strict,
+      };
       apiCfgSnapshot = snap;
     }
   }
@@ -371,7 +378,17 @@
         <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
           <div class="col-span-2">
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.baseUrl')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.example.com/v1/" disabled={$taskRunning || testingApi} />
+            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.openai.com/v1" disabled={$taskRunning || testingApi} />
+            <label class="label cursor-pointer justify-start gap-2 py-1 px-0 min-h-0">
+              <input type="checkbox" class="toggle toggle-xs" bind:checked={localApiCfg.url_strict} disabled={$taskRunning || testingApi} />
+              <span class="label-text text-xs text-base-content/60">{$t('config.api.urlStrict')}</span>
+            </label>
+            <p class="text-xs text-base-content/45 mb-1">{$t('config.api.urlStrictHint')}</p>
+            {#if resolvedChatURL}
+              <p class="text-xs text-base-content/50 break-all">
+                {$t('config.api.resolvedUrl')}: <code class="font-mono text-primary/80">{resolvedChatURL}</code>
+              </p>
+            {/if}
           </div>
           <div>
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.model')}</span>
