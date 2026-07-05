@@ -17,13 +17,13 @@ type ChatSession struct {
 }
 
 type ChatMessage struct {
-	Role            string     `json:"role"`
-	Content         string     `json:"content"`
-	ToolCalls       []ToolCall `json:"tool_calls,omitempty"`
-	ToolResult      string     `json:"tool_result,omitempty"`
-	ToolResultKey   string     `json:"tool_result_key,omitempty"`
-	ToolResultArgs  []string   `json:"tool_result_args,omitempty"`
-	Timestamp       string     `json:"timestamp"`
+	Role           string     `json:"role"`
+	Content        string     `json:"content"`
+	ToolCalls      []ToolCall `json:"tool_calls,omitempty"`
+	ToolResult     string     `json:"tool_result,omitempty"`
+	ToolResultKey  string     `json:"tool_result_key,omitempty"`
+	ToolResultArgs []string   `json:"tool_result_args,omitempty"`
+	Timestamp      string     `json:"timestamp"`
 }
 
 type ChatSessionIndex struct {
@@ -39,7 +39,36 @@ type ChatSessionMeta struct {
 }
 
 func chatSessionsDir(baseDir string) string {
-	return filepath.Join(baseDir, "sessions")
+	return baseDir
+}
+
+func migrateLegacyChatSessionsDir(baseDir string) error {
+	legacyDir := filepath.Join(baseDir, "sessions")
+	entries, err := os.ReadDir(legacyDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return os.MkdirAll(baseDir, 0755)
+		}
+		return err
+	}
+
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		oldPath := filepath.Join(legacyDir, entry.Name())
+		newPath := filepath.Join(baseDir, entry.Name())
+		if _, err := os.Stat(newPath); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.Rename(oldPath, newPath); err != nil {
+			return err
+		}
+	}
+	_ = os.Remove(legacyDir)
+	return nil
 }
 
 func chatIndexPath(baseDir string) string {
@@ -59,7 +88,7 @@ func isValidSessionID(id string) bool {
 }
 
 func LoadChatSessions(baseDir string) (*ChatSessionIndex, error) {
-indexPath := chatIndexPath(baseDir)
+	indexPath := chatIndexPath(baseDir)
 	data, err := os.ReadFile(indexPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -144,6 +173,41 @@ func DeleteChatSession(baseDir, id string) error {
 	idx.Sessions = filtered
 
 	return saveChatSessions(baseDir, idx)
+}
+
+func deleteOrphanEmptyChatSessions(baseDir string, idx *ChatSessionIndex) error {
+	indexed := map[string]bool{}
+	if idx != nil {
+		for _, meta := range idx.Sessions {
+			indexed[meta.ID] = true
+		}
+	}
+
+	entries, err := os.ReadDir(chatSessionsDir(baseDir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || filepath.Ext(name) != ".json" || name == "index.json" {
+			continue
+		}
+		id := name[:len(name)-len(".json")]
+		if indexed[id] || !isValidSessionID(id) {
+			continue
+		}
+		session, err := LoadChatSession(baseDir, id)
+		if err != nil {
+			continue
+		}
+		if len(session.Messages) == 0 {
+			_ = deleteFile(filepath.Join(chatSessionsDir(baseDir), name))
+		}
+	}
+	return nil
 }
 
 func updateChatIndex(baseDir string, session *ChatSession) error {

@@ -23,6 +23,7 @@ var staticFiles embed.FS
 
 func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, state *Progress, settings *ProjectSettings, skills []Skill, sessionsDir string, logger *LogBroadcaster, port string, progDir string, version string) {
 	h := NewHandlers(apiCfg, apiCfgPath, logger, progDir, version)
+	h.sessionsDir = sessionsDir
 
 	mux := http.NewServeMux()
 
@@ -276,7 +277,10 @@ func (h *Handlers) PostProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionsDir := filepath.Join(projectDir, "sessions")
-	os.MkdirAll(sessionsDir, 0755)
+	if err := migrateLegacyChatSessionsDir(sessionsDir); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "create_project_dir_failed", err.Error())
+		return
+	}
 
 	cfg := DefaultConfigForLang(lang)
 	if err := saveConfig(filepath.Join(projectDir, "config.json"), cfg); err != nil {

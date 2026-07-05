@@ -137,7 +137,9 @@
     try {
       const session = await api('POST', '/api/chat/sessions');
       chatSessions.set(await api('GET', '/api/chat/sessions'));
-      await selectSession(session.id);
+      currentChatSession.set(session);
+      showSessionList = false;
+      autoScroll = true;
     } catch (e) { addToast(e.message, 'error'); }
   }
 

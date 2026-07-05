@@ -25,14 +25,14 @@ type Handlers struct {
 	projectMu   sync.RWMutex
 
 	// Per-project state (updated on switchProject)
-	cfg          *Config
-	cfgPath      string
-	state        *Progress
-	progressPath string
-	settings     *ProjectSettings
-	settingsPath string
-	skills       []Skill
-	sessionsDir  string
+	cfg             *Config
+	cfgPath         string
+	state           *Progress
+	progressPath    string
+	settings        *ProjectSettings
+	settingsPath    string
+	skills          []Skill
+	sessionsDir     string
 	postprocess     *PostProcessState
 	postprocessPath string
 
@@ -65,7 +65,6 @@ func NewHandlers(apiCfg *APIConfig, apiCfgPath string, logger *LogBroadcaster, p
 		},
 	}
 }
-
 func (h *Handlers) storysDir() string {
 	return filepath.Join(h.progDir, "storys")
 }
@@ -94,7 +93,9 @@ func (h *Handlers) switchProject(name string) error {
 	progressPath := filepath.Join(projectDir, "progress.json")
 	settingsPath := filepath.Join(projectDir, "settings.json")
 	sessionsDir := filepath.Join(projectDir, "sessions")
-	os.MkdirAll(sessionsDir, 0755)
+	if err := migrateLegacyChatSessionsDir(sessionsDir); err != nil {
+		return fmt.Errorf("迁移会话目录失败: %w", err)
+	}
 
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
@@ -672,10 +673,10 @@ func (h *Handlers) PostOutlineCharactersConfirm(w http.ResponseWriter, r *http.R
 			notes += role
 		}
 		h.settings.Characters = append(h.settings.Characters, Character{
-			ID:       h.settings.nextCharacterID(),
-			Name:     name,
+			ID:         h.settings.nextCharacterID(),
+			Name:       name,
 			Background: notes,
-			Notes:    fmt.Sprintf("首次登场：第%d章", item.ChapterNum),
+			Notes:      fmt.Sprintf("首次登场：第%d章", item.ChapterNum),
 		})
 		existing[name] = true
 	}
@@ -2558,6 +2559,9 @@ func (h *Handlers) PutSkillToggle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) GetChatSessions(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
 	idx, err := LoadChatSessions(h.sessionsDir)
 	if err != nil {
 		h.writeErrorReq(w, r, http.StatusInternalServerError, "load_session_list_failed", err.Error())
@@ -2578,11 +2582,15 @@ func (h *Handlers) GetChatSessions(w http.ResponseWriter, r *http.Request) {
 		cleaned = append(cleaned, m)
 	}
 	idx.Sessions = cleaned
+	_ = deleteOrphanEmptyChatSessions(h.sessionsDir, idx)
 
 	h.writeJSON(w, http.StatusOK, idx)
 }
 
 func (h *Handlers) PostChatSession(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
 	now := time.Now().Format(time.RFC3339)
 	session := &ChatSession{
 		ID:        generateSessionID(),
@@ -2592,18 +2600,13 @@ func (h *Handlers) PostChatSession(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: now,
 	}
 
-	// 保存会话文件但不加入索引，等首次发消息时 SaveChatSession 才入索引，
-	// 避免产生 0 条记录的空会话。
-	dir := chatSessionsDir(h.sessionsDir)
-	os.MkdirAll(dir, 0755)
-	path := filepath.Join(dir, session.ID+".json")
-	data, _ := json.MarshalIndent(session, "", "  ")
-	writeFileAtomic(path, data)
-
 	h.writeJSON(w, http.StatusOK, session)
 }
 
 func (h *Handlers) GetChatSession(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 
 	session, err := LoadChatSession(h.sessionsDir, id)
@@ -2616,6 +2619,9 @@ func (h *Handlers) GetChatSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
 	if h.rejectIfTaskRunning(w, r) {
 		return
 	}
@@ -2630,6 +2636,9 @@ func (h *Handlers) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
 	if !h.tryStartTask() {
 		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
 		return
@@ -2649,9 +2658,19 @@ func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
 
 	session, err := LoadChatSession(h.sessionsDir, sessionID)
 	if err != nil {
-		h.endTask()
-		h.writeErrorReq(w, r, http.StatusNotFound, "chat_session_not_found")
-		return
+		if !isValidSessionID(sessionID) {
+			h.endTask()
+			h.writeErrorReq(w, r, http.StatusNotFound, "chat_session_not_found")
+			return
+		}
+		now := time.Now().Format(time.RFC3339)
+		session = &ChatSession{
+			ID:        sessionID,
+			Title:     "新会话",
+			Messages:  []ChatMessage{},
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
 	}
 
 	now := time.Now().Format(time.RFC3339)

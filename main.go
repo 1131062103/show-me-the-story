@@ -61,8 +61,6 @@ func main() {
 	state := &Progress{Phase: "outline"}
 	settings := &ProjectSettings{}
 	skills := LoadAllSkills(cfg, progDir)
-	sessionsDir := filepath.Join(progDir, "sessions")
-	os.MkdirAll(sessionsDir, 0755)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -78,5 +76,5 @@ func main() {
 	fmt.Printf(" [系统] 程序目录: %s\n", progDir)
 	fmt.Printf(" [系统] 项目目录: %s\n", storysDir)
 
-	startWebServer(apiCfg, apiCfgPath, cfg, state, settings, skills, sessionsDir, logger, port, progDir, version)
+	startWebServer(apiCfg, apiCfgPath, cfg, state, settings, skills, "", logger, port, progDir, version)
 }
