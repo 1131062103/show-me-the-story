@@ -18,6 +18,7 @@ Use the repo root as the working directory.
 
 ```bash
 task build             # full build: npm install + npm run build + go build
+task frontend:build    # rebuild embedded frontend assets in frontend/dist
 task build:go          # Go-only build; requires frontend/dist to already exist
 task dev               # full build, then run the backend binary
 task dev:frontend      # Vite dev server with /api proxy to :48090
@@ -25,7 +26,7 @@ go test ./...          # run Go tests
 go build -o show-me-the-story .
 ```
 
-Before finishing code changes, run the narrowest relevant test first. For broad backend changes, run `go test ./...` and `go build -o show-me-the-story .`. For frontend changes, run `cd frontend && npm run build`.
+Before finishing code changes, run the narrowest relevant test first. For broad backend changes, run `go test ./...` and `go build -o show-me-the-story .`. For frontend changes, run `cd frontend && npm run build`. After `task clean` or on a fresh checkout without [frontend/dist/](frontend/dist/), run `task frontend:build` or `task build` before Go-only build checks because the production frontend is embedded by Go.
 
 ## Architecture Map
 
@@ -67,6 +68,13 @@ AI operations are mutually exclusive and usually asynchronous:
 5. Synchronous edit endpoints should call `rejectIfTaskRunning(w)` to avoid data races while AI work is active.
 
 When adding an async endpoint, register the route in [web.go](web.go), add localized task/log messages, broadcast progress after state changes, and make sure errors release the task lock.
+
+## API and SSE Changes
+
+- Register HTTP routes in [web.go](web.go) using the existing Go method-pattern style. Project-scoped handlers should call `ensureProject`; synchronous mutating handlers should call `rejectIfTaskRunning`.
+- Return API errors with `writeErrorReq` and stable keys from [locale.go](locale.go); frontend calls through [frontend/src/lib/api.js](frontend/src/lib/api.js) expect localized JSON errors and send locale headers.
+- For new task, log, or SSE event behavior, update the backend emitters in [logger.go](logger.go) and related task code, then mirror any rendered labels or messages in [messages.go](messages.go), [frontend/src/lib/i18n/zh.js](frontend/src/lib/i18n/zh.js), and [frontend/src/lib/i18n/en.js](frontend/src/lib/i18n/en.js).
+- When frontend state should react to streamed events, update [frontend/src/lib/sse.js](frontend/src/lib/sse.js) and the shared stores in [frontend/src/lib/stores.js](frontend/src/lib/stores.js) instead of duplicating cross-page state in a page component.
 
 ## Frontend Patterns
 
