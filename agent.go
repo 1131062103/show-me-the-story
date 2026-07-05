@@ -138,10 +138,9 @@ func RunAgentLoop(goCtx context.Context, ctx *AgentContext, userMessage string, 
 			ctx.Logger.Info(fmt.Sprintf("[Agent] 步骤 %d: 检测到工具调用 → %s", step+1, toolCall.Name))
 		}
 
-		// 保存到历史时，剥离 <tool_call> 标签，只保留工具调用结构。
-		// 避免前端同时从 m.tool_calls 和 m.content 渲染导致重复显示。
-		strippedContent := stripToolCallTags(fullResp)
-		history = append(history, AgentStep{Role: "assistant", Content: strippedContent, ToolCall: toolCall})
+		// 保存到历史时只保留结构化工具调用，丢弃同条回复里夹带的正文。
+		// 工具调用前后的正文可能是模型误生成内容，不能作为可信上下文回灌。
+		history = append(history, AgentStep{Role: "assistant", ToolCall: toolCall})
 
 		if ctx.Logger != nil {
 			ctx.Logger.ToolCallStart("", toolCall.Name, string(toolCall.Arguments))
@@ -809,11 +808,12 @@ func getBuiltinTools() []Tool {
 		},
 		{
 			Name:        "read_chapter",
-			Description: "获取指定章节内容",
-			Parameters:  `{"num": 1}`,
+			Description: "获取指定章节内容。默认会给正文段落加 P1/P2 编号，便于后续用 edit_chapter_content 做段落级精确编辑。",
+			Parameters:  `{"num": 1, "numbered": true}`,
 			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
 				var params struct {
-					Num int `json:"num"`
+					Num      int  `json:"num"`
+					Numbered bool `json:"numbered"`
 				}
 				json.Unmarshal(args, &params)
 
@@ -828,7 +828,22 @@ func getBuiltinTools() []Tool {
 							result.WriteString(fmt.Sprintf("摘要: %s\n\n", ch.Summary))
 						}
 						if ch.Content != "" {
-							result.WriteString(ch.Content)
+							paragraphs := splitContentParagraphs(ch.Content)
+							if len(paragraphs) > 0 && params.Numbered {
+								lockSet := paragraphLockSet(ch.ParagraphLocks)
+								for i, p := range paragraphs {
+									if i > 0 {
+										result.WriteString("\n\n")
+									}
+									lockMark := ""
+									if lockSet[i+1] {
+										lockMark = " [locked]"
+									}
+									result.WriteString(fmt.Sprintf("P%d%s: %s", i+1, lockMark, p))
+								}
+							} else {
+								result.WriteString(ch.Content)
+							}
 						} else {
 							result.WriteString("(尚未生成内容)")
 						}
@@ -1417,8 +1432,8 @@ func getBuiltinTools() []Tool {
 		},
 		{
 			Name:        "edit_chapter_content",
-			Description: "对章节正文进行局部编辑（同步），无需重写整章。支持 4 种操作：replace_lines（替换行范围）、replace_text（查找替换文本片段）、insert_after_line（在指定行后插入）、append（末尾追加）。适合微调个别段落、修正错误、追加场景等。",
-			Parameters:  `{"num": 1, "operation": "replace_lines|replace_text|insert_after_line|append", "start_line": 1, "end_line": 5, "old_text": "要查找的原文", "line": 10, "new_text": "新内容"}`,
+			Description: "对章节正文进行局部编辑（同步），无需重写整章。支持行级、文本级、段落级操作：replace_lines、delete_lines、replace_text、insert_after_line、replace_paragraphs、delete_paragraphs、insert_after_paragraph、append。段落操作使用 read_chapter 返回的 P1/P2 编号；若段落已标记 [locked]，不能替换或删除。适合微调个别段落、增减段落、修正错误、追加场景等。",
+			Parameters:  `{"num": 1, "operation": "replace_paragraphs|delete_paragraphs|insert_after_paragraph|replace_lines|delete_lines|replace_text|insert_after_line|append", "start_paragraph": 2, "end_paragraph": 2, "paragraph": 3, "start_line": 1, "end_line": 5, "old_text": "要查找的原文", "line": 10, "new_text": "新内容"}`,
 			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
 				var req EditChapterContentRequest
 				if err := json.Unmarshal(args, &req); err != nil {
@@ -1427,7 +1442,7 @@ func getBuiltinTools() []Tool {
 				if req.Operation == "" {
 					return "", agentErr(ctx, "chapter_edit_op_required")
 				}
-				if req.NewText == "" && req.Operation != EditOpReplaceText {
+				if req.NewText == "" && req.Operation != EditOpReplaceText && req.Operation != EditOpDeleteLines && req.Operation != EditOpDeleteParagraphs {
 					return "", agentErr(ctx, "chapter_edit_text_required")
 				}
 

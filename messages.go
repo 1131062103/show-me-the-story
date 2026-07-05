@@ -709,8 +709,8 @@ var messageCatalog = map[string]map[string]string{
 		LangEN: "Chapter %d content edited (op: %s, %d lines total).",
 	},
 	"agent.chapter_edit_op_required": {
-		LangZH: "缺少 operation 参数，必须为 replace_lines / replace_text / insert_after_line / append 之一",
-		LangEN: "Missing operation parameter; must be one of: replace_lines / replace_text / insert_after_line / append",
+		LangZH: "缺少 operation 参数，必须为 replace_lines / delete_lines / replace_text / insert_after_line / replace_paragraphs / delete_paragraphs / insert_after_paragraph / append 之一",
+		LangEN: "Missing operation parameter; must be one of: replace_lines / delete_lines / replace_text / insert_after_line / replace_paragraphs / delete_paragraphs / insert_after_paragraph / append",
 	},
 	"agent.chapter_edit_text_required": {
 		LangZH: "new_text 不能为空",

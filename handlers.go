@@ -942,7 +942,7 @@ func (h *Handlers) PostChapterEdit(w http.ResponseWriter, r *http.Request) {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "chapter_edit_op_required")
 		return
 	}
-	if req.NewText == "" && req.Operation != EditOpReplaceText {
+	if req.NewText == "" && req.Operation != EditOpReplaceText && req.Operation != EditOpDeleteLines && req.Operation != EditOpDeleteParagraphs {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "chapter_edit_text_required")
 		return
 	}

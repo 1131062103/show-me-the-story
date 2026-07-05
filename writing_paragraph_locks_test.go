@@ -13,6 +13,26 @@ func TestMergeLockedParagraphsRestoresLockedText(t *testing.T) {
 	}
 }
 
+func TestMergeLockedParagraphsKeepsOriginalWhenRevisedDeletesLockedParagraph(t *testing.T) {
+	original := "第一段原文。\n\n第二段原文。\n\n第三段原文。"
+	revised := "第一段改写。"
+
+	got := mergeLockedParagraphs(original, revised, []int{2})
+	want := "第一段改写。\n\n第二段原文。\n\n第三段原文。"
+	if got != want {
+		t.Fatalf("mergeLockedParagraphs() = %q, want %q", got, want)
+	}
+}
+
+func TestMergeLockedParagraphsKeepsOriginalWhenRevisionIsEmpty(t *testing.T) {
+	original := "第一段原文。\n\n第二段原文。\n\n第三段原文。"
+
+	got := mergeLockedParagraphs(original, "", []int{2})
+	if got != original {
+		t.Fatalf("mergeLockedParagraphs() = %q, want %q", got, original)
+	}
+}
+
 func TestSetChapterParagraphLocksFiltersInvalidNumbers(t *testing.T) {
 	state := &Progress{Chapters: []ChapterState{{Num: 3, Content: "一\n\n二\n\n三"}}}
 

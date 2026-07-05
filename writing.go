@@ -784,12 +784,23 @@ func mergeLockedParagraphs(original, revised string, locks []int) string {
 	}
 	originalParagraphs := splitContentParagraphs(original)
 	revisedParagraphs := splitContentParagraphs(revised)
-	if len(originalParagraphs) == 0 || len(revisedParagraphs) == 0 {
+	if len(originalParagraphs) == 0 {
 		return revised
+	}
+	if len(revisedParagraphs) < len(originalParagraphs) {
+		merged := make([]string, len(originalParagraphs))
+		for i := range originalParagraphs {
+			if lockSet[i+1] || i >= len(revisedParagraphs) {
+				merged[i] = originalParagraphs[i]
+			} else {
+				merged[i] = revisedParagraphs[i]
+			}
+		}
+		return strings.Join(merged, "\n\n")
 	}
 	for num := range lockSet {
 		idx := num - 1
-		if idx >= 0 && idx < len(originalParagraphs) && idx < len(revisedParagraphs) {
+		if idx >= 0 && idx < len(originalParagraphs) {
 			revisedParagraphs[idx] = originalParagraphs[idx]
 		}
 	}
