@@ -265,7 +265,7 @@
     <!-- 进度 -->
     <div class="card bg-base-200 shadow-sm">
       <div class="card-body p-4 gap-2">
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 flex-wrap">
           <h2 class="card-title text-base flex-1">{$t('writing.progress.title')}</h2>
           <label class="flex items-center gap-1.5 cursor-pointer" title={$t('writing.progress.autoConfirmTip')}>
             <input type="checkbox" class="toggle toggle-xs toggle-success" checked={$autoConfirm} on:change={toggleAutoConfirm} />
@@ -351,9 +351,9 @@
     <PostProcessPanel />
 
     <!-- 章节区 -->
-    <div class="grid grid-cols-[230px_1fr] gap-3" style="min-height:400px">
+    <div class="grid grid-cols-[230px_1fr] gap-3 max-md:grid-cols-1" style="min-height:400px">
       <!-- 章节列表 -->
-      <div class="card bg-base-200 shadow-sm overflow-y-auto max-h-[calc(100vh-280px)]">
+      <div class="card bg-base-200 shadow-sm overflow-y-auto max-h-[calc(100vh-280px)] max-md:max-h-56">
         <ul class="menu menu-sm p-0 w-full">
           {#each chapters as c, i}
             <li>
@@ -406,7 +406,7 @@
                     {$t('writing.chapter.streamHint')}
                   </div>
                 {/if}
-                <div class="flex items-center gap-2 justify-between text-xs text-base-content/45">
+                <div class="flex items-center gap-2 justify-between text-xs text-base-content/45 flex-wrap">
                   <span>{$t('writing.paragraph.count', { n: displayParagraphs.length || '-' })}</span>
                   {#if !isStreamingThis && displayParagraphs.length > 0}
                     <div class="join">
@@ -415,7 +415,7 @@
                     </div>
                   {/if}
                 </div>
-                <div bind:this={contentEl} class="bg-base-300 rounded-lg p-3 text-[15px] reading-area max-h-[calc(100vh-420px)] min-h-[200px] overflow-y-auto">
+                <div bind:this={contentEl} class="bg-base-300 rounded-lg p-3 text-[15px] reading-area max-h-[calc(100vh-420px)] min-h-[200px] overflow-y-auto max-md:max-h-none">
                   {#if isStreamingThis}
                     <div class="chapter-content">{displayContent}</div>
                     <span class="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5 align-text-bottom"></span>
@@ -483,7 +483,7 @@
                     disabled={$taskRunning}
                   ></textarea>
                   <div class="flex justify-between items-center">
-                    <span class="text-xs text-base-content/40">
+                    <span class="text-xs text-base-content/40 min-w-0">
                       {#if !(isCurrent && ch.status === 'review')}
                         {$t('writing.revise.hintTargeted')}
                       {:else}

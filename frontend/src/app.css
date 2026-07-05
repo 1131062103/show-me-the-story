@@ -161,3 +161,49 @@ body {
 .animate-bounce-in {
   animation: bounce-in 0.4s ease-out;
 }
+
+@media (max-width: 768px) {
+  html, body, #app {
+    height: 100dvh;
+  }
+
+  .grid-cols-2,
+  .grid-cols-\[230px_1fr\],
+  .grid-cols-\[1fr_auto_auto\] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .col-span-2 {
+    grid-column: span 1 / span 1 !important;
+  }
+
+  .card-body {
+    padding: 0.875rem;
+  }
+
+  .btn,
+  .badge,
+  .input,
+  .select,
+  .textarea {
+    max-width: 100%;
+  }
+
+  .join {
+    max-width: 100%;
+  }
+
+  .join .input,
+  .join .select {
+    min-width: 0;
+  }
+
+  .chat-bubble {
+    max-width: min(100%, calc(100vw - 2rem)) !important;
+    overflow-wrap: anywhere;
+  }
+
+  .reading-area {
+    max-height: none !important;
+  }
+}

@@ -88,10 +88,10 @@
   }
 </script>
 
-<div class="flex flex-col h-screen bg-base-300 text-base-content overflow-hidden">
+<div class="app-shell flex flex-col h-screen bg-base-300 text-base-content overflow-hidden">
   <!-- Header -->
-  <header class="navbar bg-base-200 border-b border-base-content/10 px-6 min-h-[46px] shrink-0 gap-4">
-    <span class="text-lg font-semibold">{$t('app.title')}</span>
+  <header class="navbar bg-base-200 border-b border-base-content/10 px-6 min-h-[46px] shrink-0 gap-4 max-md:flex-wrap max-md:items-start max-md:px-3 max-md:py-2 max-md:gap-2">
+    <span class="text-lg font-semibold max-md:text-base max-md:w-full">{$t('app.title')}</span>
     {#if appVersion}
       <span class="badge badge-xs badge-ghost font-mono">{appVersion}</span>
     {/if}
@@ -125,7 +125,7 @@
         </span>
       {/if}
     {/if}
-    <span class="flex-1"></span>
+    <span class="flex-1 max-md:hidden"></span>
     <button
       class="btn btn-ghost btn-xs gap-1"
       on:click={toggleLocale}
@@ -141,9 +141,9 @@
       <Projects />
     </main>
   {:else}
-    <div class="flex flex-1 overflow-hidden">
+    <div class="app-workspace flex flex-1 overflow-hidden max-md:flex-col max-md:overflow-y-auto">
       <!-- Left: vertical nav -->
-      <nav class="flex flex-col w-44 shrink-0 bg-base-200 border-r border-base-content/10 py-3 px-2 gap-0.5">
+      <nav class="app-nav flex flex-col w-44 shrink-0 bg-base-200 border-r border-base-content/10 py-3 px-2 gap-0.5 max-md:w-full max-md:flex-row max-md:overflow-x-auto max-md:border-r-0 max-md:border-b max-md:py-2 max-md:px-2">
         {#each [
           ['config', '⚙️', 'nav.config'],
           ['outline', '📝', 'nav.outline'],
@@ -154,7 +154,7 @@
           ['skills', '🧩', 'nav.skills']
         ] as [page, icon, labelKey]}
           <button
-            class="btn btn-sm justify-start w-full gap-2 px-3 text-sm {$currentPage === page ? 'btn-primary font-medium' : 'btn-ghost'}"
+            class="btn btn-sm justify-start w-full gap-2 px-3 text-sm whitespace-nowrap max-md:w-auto max-md:shrink-0 {$currentPage === page ? 'btn-primary font-medium' : 'btn-ghost'}"
             on:click={() => window.location.hash = '#' + page}
           >
             <span class="text-xs">{icon}</span>{$t(labelKey)}
@@ -163,7 +163,7 @@
       </nav>
 
       <!-- Center: page content -->
-      <main class="flex-1 min-w-0 overflow-y-auto p-4 border-r border-base-content/10">
+      <main class="app-main flex-1 min-w-0 overflow-y-auto p-4 border-r border-base-content/10 max-md:overflow-visible max-md:p-3 max-md:border-r-0">
         {#if $currentPage === 'config'}
           <Config {sendToChat} />
         {:else if $currentPage === 'outline'}
@@ -182,7 +182,7 @@
       </main>
 
       <!-- Right: Chat Panel -->
-      <div class="flex-1 min-w-0 bg-base-200 overflow-hidden">
+      <div class="app-chat flex-1 min-w-0 bg-base-200 overflow-hidden max-md:flex-none max-md:min-h-[70vh] max-md:border-t max-md:border-base-content/10">
         <ChatPanel bind:this={chatPanel} contextPage={$currentPage} />
       </div>
     </div>

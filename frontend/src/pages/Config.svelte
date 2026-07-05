@@ -481,12 +481,12 @@
 <div class="space-y-3">
   <ConfigChangePanel />
   <!-- API + Story Config: side by side -->
-  <div class="grid grid-cols-2 gap-3">
+  <div class="grid grid-cols-2 gap-3 max-md:grid-cols-1">
     <div class="card bg-base-200 shadow-sm">
       <div class="card-body p-4 gap-2">
         <h3 class="card-title text-base">{$t('config.api.title')}</h3>
         <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
-          <div class="col-span-2 grid grid-cols-[1fr_auto_auto] gap-2 items-end">
+          <div class="col-span-2 grid grid-cols-[1fr_auto_auto] gap-2 items-end max-md:grid-cols-1">
             <div>
               <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.profile')}</span>
               <select class="select select-sm w-full" value={localApiCfg.active_profile_id} on:change={(e) => applyProfile(e.currentTarget.value)} disabled={$taskRunning || testingApi || loadingModels}>
@@ -518,7 +518,7 @@
           </div>
           <div>
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.model')}</span>
-            <div class="join w-full">
+            <div class="join w-full max-md:flex max-md:flex-wrap">
               {#if apiModels.length > 0}
                 <select class="select select-sm join-item flex-1 min-w-0" bind:value={localApiCfg.model} disabled={$taskRunning || testingApi || loadingModels}>
                   {#each apiModels as model}
@@ -528,7 +528,7 @@
               {:else}
                 <input type="text" class="input input-sm join-item flex-1 min-w-0" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi || loadingModels} />
               {/if}
-              <button class="btn btn-outline btn-sm join-item" on:click={fetchModels} disabled={$taskRunning || testingApi || loadingModels || !localApiCfg.base_url.trim()}>
+              <button class="btn btn-outline btn-sm join-item max-md:w-full" on:click={fetchModels} disabled={$taskRunning || testingApi || loadingModels || !localApiCfg.base_url.trim()}>
                 {#if loadingModels}<span class="loading loading-spinner loading-xs"></span>{:else}{$t('config.api.fetchModels')}{/if}
               </button>
             </div>
@@ -550,7 +550,7 @@
             <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi || loadingModels} />
           </div>
         </div>
-        <div class="flex justify-end gap-2">
+        <div class="flex justify-end gap-2 flex-wrap">
           <button class="btn btn-outline btn-xs" on:click={testAPIConfig} disabled={$taskRunning || testingApi}>
             {#if testingApi}
               <span class="loading loading-spinner loading-xs"></span>{$t('config.api.testing')}
@@ -700,7 +700,7 @@
           </div>
         {/if}
 
-        <div class="flex gap-1.5">
+        <div class="flex gap-1.5 flex-wrap">
           <button class="btn btn-primary btn-xs" on:click={() => openCharForm(null)} disabled={$taskRunning}>{$t('config.char.create')}</button>
           {#if chars.length > 0}
             <button class="btn btn-accent btn-xs" on:click={submitCharacters} disabled={$taskRunning}>{$t('config.char.submit')}</button>
@@ -720,7 +720,7 @@
         <svg class="w-4 h-4 text-base-content/40 transition-transform" class:rotate-180={wvCollapse} viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
       </div>
       {#if !wvCollapse}
-        <div class="tabs tabs-box tabs-xs bg-base-300 w-fit">
+        <div class="tabs tabs-box tabs-xs bg-base-300 w-fit max-md:w-full max-md:overflow-x-auto max-md:flex-nowrap">
           {#each wvTabs as [cat, label]}
             <button class="tab tab-xs {$wvFilter === cat ? 'tab-active' : ''}" on:click={() => wvFilter.set(cat)}>
               {label}
@@ -781,7 +781,7 @@
           </div>
         {/if}
 
-        <div class="flex gap-1.5">
+        <div class="flex gap-1.5 flex-wrap">
           <button class="btn btn-primary btn-xs" on:click={() => openWvForm(null)} disabled={$taskRunning}>{$t('config.wv.create')}</button>
           {#if allWvs.length > 0}
             <button class="btn btn-accent btn-xs" on:click={submitWorldview} disabled={$taskRunning}>{$t('config.wv.submit')}</button>
