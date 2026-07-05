@@ -158,7 +158,7 @@ var DefaultPromptsZH = PromptsConfig{
 【用户意见】
 {{.UserFeedback}}
 
-【已确认章节（不可修改）】
+【已锁定章节（不可修改，含已确认章节和用户手动锁定章节）】
 {{.LockedChapters}}
 
 【已登记角色】
@@ -176,7 +176,7 @@ var DefaultPromptsZH = PromptsConfig{
 }
 
 注意：
-1. 已锁定的章节内容不可修改，只能修改未锁定的章节
+1. 已锁定的章节标题和大纲内容不可修改，只能修改未锁定的章节
 2. 保持章节总数和编号不变，除非用户意见明确要求增删章节
 3. 与用户意见无关的章节保持原样返回，不要顺手改写
 4. 未锁定章节的 outline 须为 {{.OutlineMinWords}}–{{.OutlineMaxWords}} 字，包含具体情节要素（场景、冲突、转折、人物、章末钩子）；优先使用【已登记角色】

@@ -73,7 +73,7 @@ func ReconcileSettingsAction(ctx context.Context, apiCfg *APIConfig, cfg *Config
 
 	hasPending := false
 	for _, ch := range state.Chapters {
-		if ch.Status == StatusPending {
+		if ch.Status == StatusPending && !isChapterOutlineLocked(ch) {
 			hasPending = true
 			break
 		}
@@ -121,18 +121,21 @@ func regeneratePendingOutlines(ctx context.Context, apiCfg *APIConfig, cfg *Conf
 
 	pendingChapters := ""
 	for _, ch := range state.Chapters {
-		if ch.Status == StatusPending {
+		if ch.Status == StatusPending && !isChapterOutlineLocked(ch) {
 			pendingChapters += formatChapterLine(ch.Num, ch.Title, ch.Outline, lang)
 		}
+	}
+	if pendingChapters == "" {
+		return nil
 	}
 
 	lockedChapters := ""
 	for _, ch := range state.Chapters {
-		if ch.Status == StatusAccepted {
+		if isChapterOutlineLocked(ch) {
 			if en {
-				lockedChapters += fmt.Sprintf("Chapter %d \"%s\" (summary): %s\n", ch.Num, ch.Title, ch.Summary)
+				lockedChapters += fmt.Sprintf("Chapter %d \"%s\" %s: %s\n", ch.Num, ch.Title, outlineLockText(lang), ch.Outline)
 			} else {
-				lockedChapters += fmt.Sprintf("第%d章《%s》（摘要）: %s\n", ch.Num, ch.Title, ch.Summary)
+				lockedChapters += fmt.Sprintf("第%d章《%s》%s: %s\n", ch.Num, ch.Title, outlineLockText(lang), ch.Outline)
 			}
 		}
 	}

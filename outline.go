@@ -91,6 +91,34 @@ func intSliceToStr(nums []int) []string {
 	return out
 }
 
+func isChapterOutlineLocked(ch ChapterState) bool {
+	return ch.Status == StatusAccepted || ch.OutlineLocked
+}
+
+func outlineLockText(lang string) string {
+	if NormalizeLanguage(lang) == LangEN {
+		return "(locked; must not be changed)"
+	}
+	return "（已锁定，不可修改）"
+}
+
+func filterUnlockedOutlineChapters(chapters []OutlineChapter, state *Progress) []OutlineChapter {
+	lockedMap := make(map[int]bool)
+	for _, ch := range state.Chapters {
+		if isChapterOutlineLocked(ch) {
+			lockedMap[ch.Num] = true
+		}
+	}
+
+	out := make([]OutlineChapter, 0, len(chapters))
+	for _, ch := range chapters {
+		if !lockedMap[ch.Num] {
+			out = append(out, ch)
+		}
+	}
+	return out
+}
+
 func generateOutlineChaptersOnly(ctx context.Context, apiCfg *APIConfig, cfg *Config, settings *ProjectSettings, template string, baseData map[string]string, logger *LogBroadcaster) ([]OutlineChapter, error) {
 	data := mergeOutlinePromptData(baseData, cfg, settings)
 	systemPrompt := SystemPromptFor(cfg.Language, "outline_editor_json")
@@ -136,7 +164,7 @@ func reviseOutline(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *P
 
 	lockedChapters := ""
 	for _, ch := range state.Chapters {
-		if ch.Status == StatusAccepted {
+		if isChapterOutlineLocked(ch) {
 			lockedChapters += formatChapterLine(ch.Num, ch.Title, ch.Outline, lang)
 		}
 	}
@@ -180,7 +208,7 @@ func reviseOutline(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *P
 			return err
 		}
 		resp = *parsed
-		lastShort = validateOutlineChapterLengths(resp.Chapters, minLen)
+		lastShort = validateOutlineChapterLengths(filterUnlockedOutlineChapters(resp.Chapters, state), minLen)
 		if len(lastShort) == 0 {
 			break
 		}
@@ -193,16 +221,9 @@ func reviseOutline(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *P
 }
 
 func applyOutlineRevision(cfg *Config, state *Progress, resp OutlineResponse, source, pendingPath, cfgPath string, logger *LogBroadcaster) error {
-	lockedMap := make(map[int]bool)
-	for _, ch := range state.Chapters {
-		if ch.Status == StatusAccepted {
-			lockedMap[ch.Num] = true
-		}
-	}
-
 	for _, newCh := range resp.Chapters {
 		for i, existingCh := range state.Chapters {
-			if existingCh.Num == newCh.Num && !lockedMap[newCh.Num] {
+			if existingCh.Num == newCh.Num && !isChapterOutlineLocked(existingCh) {
 				state.Chapters[i].Title = newCh.Title
 				state.Chapters[i].Outline = newCh.Outline
 			}
@@ -252,13 +273,34 @@ func GenerateOutlineAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, 
 
 	logger.StepInfo(2, 2, "正在保存大纲...")
 
-	state.Chapters = make([]ChapterState, len(outlineResp.Chapters))
-	for i, ch := range outlineResp.Chapters {
-		state.Chapters[i] = ChapterState{
-			Num:     ch.Num,
-			Title:   ch.Title,
-			Outline: ch.Outline,
-			Status:  StatusPending,
+	lockedByNum := make(map[int]ChapterState)
+	for _, ch := range state.Chapters {
+		if isChapterOutlineLocked(ch) {
+			lockedByNum[ch.Num] = ch
+		}
+	}
+
+	state.Chapters = make([]ChapterState, 0, len(outlineResp.Chapters)+len(lockedByNum))
+	seen := make(map[int]bool)
+	for _, ch := range outlineResp.Chapters {
+		if lockedCh, ok := lockedByNum[ch.Num]; ok {
+			state.Chapters = append(state.Chapters, lockedCh)
+		} else {
+			state.Chapters = append(state.Chapters, ChapterState{
+				Num:     ch.Num,
+				Title:   ch.Title,
+				Outline: ch.Outline,
+				Status:  StatusPending,
+			})
+		}
+		seen[ch.Num] = true
+	}
+	for _, ch := range state.Chapters {
+		seen[ch.Num] = true
+	}
+	for _, ch := range lockedByNum {
+		if !seen[ch.Num] {
+			state.Chapters = append(state.Chapters, ch)
 		}
 	}
 
@@ -321,7 +363,20 @@ func EditChapterOutline(state *Progress, chapterNum int, title, outline string) 
 	if state.Chapters[idx].Status != StatusPending {
 		return fmt.Errorf("只能编辑待定（pending）状态的章节大纲")
 	}
+	if state.Chapters[idx].OutlineLocked {
+		return fmt.Errorf("章节 %d 的大纲已锁定，请先解锁再编辑", chapterNum)
+	}
 	state.Chapters[idx].Title = title
 	state.Chapters[idx].Outline = outline
 	return nil
+}
+
+func SetChapterOutlineLocked(state *Progress, chapterNum int, locked bool) error {
+	for i, ch := range state.Chapters {
+		if ch.Num == chapterNum {
+			state.Chapters[i].OutlineLocked = locked
+			return nil
+		}
+	}
+	return fmt.Errorf("章节 %d 不存在", chapterNum)
 }

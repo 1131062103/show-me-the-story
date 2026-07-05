@@ -497,10 +497,10 @@ func (h *Handlers) PostOutlineGenerate(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer h.endTask()
 
-		// 自动清除旧的大纲（仅 pending 章节，保留 accepted 的通过正常流程处理）
+		// 自动清除旧的大纲（仅未锁定 pending 章节，保留已确认或手动锁定章节）
 		hasPending := false
 		for _, ch := range h.state.Chapters {
-			if ch.Status == StatusPending {
+			if ch.Status == StatusPending && !isChapterOutlineLocked(ch) {
 				hasPending = true
 				break
 			}
@@ -508,7 +508,7 @@ func (h *Handlers) PostOutlineGenerate(w http.ResponseWriter, r *http.Request) {
 		if hasPending {
 			var kept []ChapterState
 			for _, ch := range h.state.Chapters {
-				if ch.Status != StatusPending {
+				if ch.Status != StatusPending || isChapterOutlineLocked(ch) {
 					kept = append(kept, ch)
 				}
 			}
@@ -1133,6 +1133,41 @@ func (h *Handlers) PutChapterOutline(w http.ResponseWriter, r *http.Request) {
 	go RunForeshadowOutlineCheckAndSave(context.Background(), h.apiCfg, h.cfg, h.state, h.progressPath, h.logger)
 
 	h.logger.SuccessKey("log.chapter_outline_updated", num)
+	h.writeJSON(w, http.StatusOK, h.state)
+}
+
+func (h *Handlers) PutChapterOutlineLock(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+
+	numStr := r.PathValue("num")
+	var num int
+	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_chapter_num")
+		return
+	}
+
+	var body struct {
+		Locked bool `json:"locked"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+
+	if err := SetChapterOutlineLocked(h.state, num, body.Locked); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+
+	if err := SaveProgress(h.progressPath, h.state); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_progress_failed", err.Error())
+		return
+	}
+
+	h.broadcastProgress()
 	h.writeJSON(w, http.StatusOK, h.state)
 }
 

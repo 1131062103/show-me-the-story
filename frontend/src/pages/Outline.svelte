@@ -99,6 +99,16 @@
     } catch (e) { addToast(e.message, 'error'); }
   }
 
+  async function toggleOutlineLock(event, ch) {
+    event.stopPropagation();
+    try {
+      const nextLocked = !ch.outline_locked;
+      progress.set(await api('PUT', '/api/outline/' + ch.num + '/lock', { locked: nextLocked }));
+      addToast($t(nextLocked ? 'outline.toasts.locked' : 'outline.toasts.unlocked', { num: ch.num }), 'success');
+      if (editingNum === ch.num && nextLocked) editingNum = -1;
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
   async function importExisting() {
     const content = importContent.trim();
     if (!content) { addToast($t('outline.toasts.importContentRequired'), 'error'); return; }
@@ -317,15 +327,27 @@
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
               <div
-                class="bg-base-300 rounded-lg p-2.5 group {ch.status === 'pending' && !$taskRunning ? 'cursor-pointer hover:ring-1 hover:ring-primary/40' : ''} transition-shadow"
-                on:click={() => ch.status === 'pending' && !$taskRunning && startEdit(ch)}
+                class="bg-base-300 rounded-lg p-2.5 group {ch.status === 'pending' && !ch.outline_locked && !$taskRunning ? 'cursor-pointer hover:ring-1 hover:ring-primary/40' : ''} {ch.outline_locked ? 'ring-1 ring-warning/35' : ''} transition-shadow"
+                on:click={() => ch.status === 'pending' && !ch.outline_locked && !$taskRunning && startEdit(ch)}
               >
                 <div class="flex items-center gap-2">
                   <span class="text-sm font-bold text-base-content/40 w-12 shrink-0">{ch.num}</span>
                   <span class="text-sm font-medium flex-1 min-w-0 truncate">{ch.title}</span>
+                  {#if ch.outline_locked}
+                    <span class="badge badge-xs badge-warning shrink-0">{$t('outline.chapter.lockedBadge')}</span>
+                  {/if}
                   <span class="badge badge-xs {statusMeta[ch.status]?.cls || 'badge-ghost'}">{statusMeta[ch.status]?.label || ch.status}</span>
                   {#if ch.status === 'pending'}
-                    <span class="text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0">{$t('outline.chapter.editTag')}</span>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-xs shrink-0"
+                      on:click={(event) => toggleOutlineLock(event, ch)}
+                      disabled={$taskRunning}
+                      title={ch.outline_locked ? $t('outline.chapter.unlockTitle') : $t('outline.chapter.lockTitle')}
+                    >{ch.outline_locked ? $t('outline.chapter.unlockTag') : $t('outline.chapter.lockTag')}</button>
+                    {#if !ch.outline_locked}
+                      <span class="text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0">{$t('outline.chapter.editTag')}</span>
+                    {/if}
                   {/if}
                 </div>
                 <p class="text-xs text-base-content/50 mt-1 ml-14 line-clamp-2">{ch.outline}</p>

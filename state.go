@@ -8,12 +8,13 @@ import (
 )
 
 type ChapterState struct {
-	Num     int    `json:"num"`
-	Title   string `json:"title"`
-	Outline string `json:"outline"`
-	Content string `json:"content"`
-	Summary string `json:"summary"`
-	Status  string `json:"status"` // pending | writing | review | accepted
+	Num           int    `json:"num"`
+	Title         string `json:"title"`
+	Outline       string `json:"outline"`
+	OutlineLocked bool   `json:"outline_locked,omitempty"`
+	Content       string `json:"content"`
+	Summary       string `json:"summary"`
+	Status        string `json:"status"` // pending | writing | review | accepted
 }
 
 type ForeshadowStatus string

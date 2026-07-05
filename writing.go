@@ -734,7 +734,7 @@ func reviseSubsequentOutlines(ctx context.Context, apiCfg *APIConfig, cfg *Confi
 	subsequentChapters := ""
 	for i := currentIdx + 1; i < len(state.Chapters); i++ {
 		ch := state.Chapters[i]
-		if ch.Status != StatusAccepted {
+		if !isChapterOutlineLocked(ch) {
 			subsequentChapters += formatChapterLine(ch.Num, ch.Title, ch.Outline, lang)
 		}
 	}
@@ -743,12 +743,14 @@ func reviseSubsequentOutlines(ctx context.Context, apiCfg *APIConfig, cfg *Confi
 	}
 
 	lockedChapters := ""
-	for i := 0; i <= currentIdx; i++ {
+	for i := 0; i < len(state.Chapters); i++ {
 		ch := state.Chapters[i]
-		if en {
-			lockedChapters += fmt.Sprintf("Chapter %d \"%s\" (summary): %s\n", ch.Num, ch.Title, ch.Summary)
-		} else {
-			lockedChapters += fmt.Sprintf("第%d章《%s》（摘要）: %s\n", ch.Num, ch.Title, ch.Summary)
+		if i <= currentIdx || isChapterOutlineLocked(ch) {
+			if en {
+				lockedChapters += fmt.Sprintf("Chapter %d \"%s\" %s: %s\n", ch.Num, ch.Title, outlineLockText(lang), ch.Outline)
+			} else {
+				lockedChapters += fmt.Sprintf("第%d章《%s》%s: %s\n", ch.Num, ch.Title, outlineLockText(lang), ch.Outline)
+			}
 		}
 	}
 
@@ -780,7 +782,7 @@ func reviseSubsequentOutlines(ctx context.Context, apiCfg *APIConfig, cfg *Confi
 
 	for _, newCh := range resp.Chapters {
 		for i, existingCh := range state.Chapters {
-			if existingCh.Num == newCh.Num && existingCh.Status != StatusAccepted {
+			if existingCh.Num == newCh.Num && !isChapterOutlineLocked(existingCh) {
 				state.Chapters[i].Title = newCh.Title
 				state.Chapters[i].Outline = newCh.Outline
 			}

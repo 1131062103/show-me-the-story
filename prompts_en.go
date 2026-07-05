@@ -148,7 +148,7 @@ or
 [User feedback]
 {{.UserFeedback}}
 
-[Locked chapters (must not be changed)]
+[Locked chapters (must not be changed; includes confirmed chapters and chapters manually locked by the user)]
 {{.LockedChapters}}
 
 [Registered characters]
@@ -166,7 +166,7 @@ Return the revised full outline as JSON:
 }
 
 Rules:
-1. Locked chapter contents may not be changed; only unlocked chapters may be edited.
+1. Locked chapter titles and outlines may not be changed; only unlocked chapters may be edited.
 2. Keep the total chapter count and numbering unchanged unless the feedback explicitly requires adding or removing chapters.
 3. Return chapters unrelated to the feedback verbatim. Do not refactor them while you're at it.
 4. Unlocked chapter outlines must be {{.OutlineMinWords}}–{{.OutlineMaxWords}} characters with concrete beats (scene, conflict, turning point, characters, hook); prefer [Registered characters].
