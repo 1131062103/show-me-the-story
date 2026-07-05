@@ -56,6 +56,9 @@
   $: isStreamingThis = $streamingChapterIdx === $selectedChapter && $streamingContent;
   // 流式期间 $streamingContent 只含尾部窗口（性能保护），全文在生成结束后由 progress 拉取
   $: displayContent = isStreamingThis ? $streamingContent : (ch?.content || '');
+  $: displayParagraphs = !isStreamingThis && displayContent ? splitParagraphs(displayContent) : [];
+  $: paragraphLocks = ch?.paragraph_locks || [];
+  $: paragraphLockSet = new Set(paragraphLocks);
   $: chapterWordCount = ch?.content ? countProseUnits(ch.content) : 0;
   $: showTaskTokens = $taskRunning && isCurrent;
   $: totalWords = chapters.reduce((sum, c) => sum + (c.content ? countProseUnits(c.content) : 0), 0);
@@ -210,6 +213,32 @@
 
   function prevChapter() { if ($selectedChapter > 0) selectChapter($selectedChapter - 1); }
   function nextChapter() { if ($selectedChapter < chapters.length - 1) selectChapter($selectedChapter + 1); }
+
+  function splitParagraphs(content) {
+    return (content || '').trim().split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+  }
+
+  async function saveParagraphLocks(locks) {
+    if (!ch) return;
+    try {
+      progress.set(await api('PUT', '/api/chapter/' + ch.num + '/paragraph-locks', { locks }));
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  function toggleParagraphLock(num) {
+    const next = new Set(paragraphLocks);
+    if (next.has(num)) next.delete(num);
+    else next.add(num);
+    saveParagraphLocks([...next].sort((a, b) => a - b));
+  }
+
+  function lockAllParagraphs() {
+    saveParagraphLocks(displayParagraphs.map((_, i) => i + 1));
+  }
+
+  function unlockAllParagraphs() {
+    saveParagraphLocks([]);
+  }
 
   function smoothTransitions() {
     confirmModal.set({
@@ -377,10 +406,39 @@
                     {$t('writing.chapter.streamHint')}
                   </div>
                 {/if}
-                <div bind:this={contentEl} class="bg-base-300 rounded-lg p-4 text-[15px] chapter-content reading-area max-h-[calc(100vh-420px)] min-h-[200px] overflow-y-auto">
-                  {displayContent}
+                <div class="flex items-center gap-2 justify-between text-xs text-base-content/45">
+                  <span>{$t('writing.paragraph.count', { n: displayParagraphs.length || '-' })}</span>
+                  {#if !isStreamingThis && displayParagraphs.length > 0}
+                    <div class="join">
+                      <button class="btn btn-ghost btn-xs join-item" on:click={lockAllParagraphs} disabled={$taskRunning}>{$t('writing.paragraph.lockAll')}</button>
+                      <button class="btn btn-ghost btn-xs join-item" on:click={unlockAllParagraphs} disabled={$taskRunning}>{$t('writing.paragraph.unlockAll')}</button>
+                    </div>
+                  {/if}
+                </div>
+                <div bind:this={contentEl} class="bg-base-300 rounded-lg p-3 text-[15px] reading-area max-h-[calc(100vh-420px)] min-h-[200px] overflow-y-auto">
                   {#if isStreamingThis}
+                    <div class="chapter-content">{displayContent}</div>
                     <span class="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5 align-text-bottom"></span>
+                  {:else}
+                    <div class="space-y-3">
+                      {#each displayParagraphs as paragraph, idx}
+                        {@const paragraphNum = idx + 1}
+                        {@const locked = paragraphLockSet.has(paragraphNum)}
+                        <div class="grid grid-cols-[auto_1fr] gap-2 rounded-md px-1.5 py-1 {locked ? 'bg-warning/10 ring-1 ring-warning/20' : ''}">
+                          <div class="flex flex-col items-center gap-1 pt-0.5 select-none">
+                            <span class="text-[11px] leading-none font-mono text-base-content/45">P{paragraphNum}</span>
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-xs min-h-0 h-5 px-1 text-[11px] {locked ? 'text-warning' : 'text-base-content/35'}"
+                              title={locked ? $t('writing.paragraph.unlockOne') : $t('writing.paragraph.lockOne')}
+                              on:click={() => toggleParagraphLock(paragraphNum)}
+                              disabled={$taskRunning}
+                            >{locked ? '🔒' : '🔓'}</button>
+                          </div>
+                          <p class="whitespace-pre-wrap leading-relaxed m-0">{paragraph}</p>
+                        </div>
+                      {/each}
+                    </div>
                   {/if}
                 </div>
               {:else if ch.status === 'pending'}

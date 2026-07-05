@@ -83,6 +83,8 @@ Writing rules:
 [Current chapter text]
 {{.OriginalContent}}
 
+{{.ParagraphLocks}}
+
 [Revision feedback]
 {{.UserFeedback}}
 
@@ -91,7 +93,8 @@ Revision rules (strict):
 2. The revised chapter must remain consistent with the story-so-far and the unchanged portions (names, timeline, established facts).
 3. Do not alter the chapter's overall plot direction unless the feedback explicitly requests it.
 4. Keep the narrative POV strictly consistent: follow [Narrative POV] throughout; do not switch person or viewpoint subject unless the POV spec explicitly allows alternation.
-5. Output the full revised chapter prose (including the unchanged portions). No chapter title, chapter number, author notes, dividers, or meta lines such as "Chapter X", "(Chapter X text)", "End of chapter", "To be continued", "Here is the revised chapter", "Below is the full text". Do not add any preamble before the prose or any summary after it.`,
+5. If [Locked paragraphs] exists, keep those paragraphs byte-for-byte unchanged. Do not rewrite, split, merge, move, delete, or paraphrase them.
+6. Output the full revised chapter prose (including the unchanged portions). No chapter title, chapter number, author notes, dividers, or meta lines such as "Chapter X", "(Chapter X text)", "End of chapter", "To be continued", "Here is the revised chapter", "Below is the full text". Do not add any preamble before the prose or any summary after it.`,
 
 	ChapterSummary: `You are a precise novel narrative-state analyst. You distil literary text into the narrative elements and psychological beats that downstream chapters need.
 

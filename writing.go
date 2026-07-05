@@ -694,6 +694,7 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *APIConfig, cfg *Con
 	historySummary := buildHistorySummaryForLang(state, chapterIdx, lang)
 	characterContext := buildCharacterContextForLang(settings, ch.Outline, lang)
 	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang)
+	paragraphLockInstructions := buildParagraphLockInstructions(ch.Content, ch.ParagraphLocks, lang)
 
 	userPrompt := RenderPrompt(cfg.Prompts.ChapterRevision, map[string]string{
 		"ChapterNum":       fmt.Sprintf("%d", ch.Num),
@@ -706,8 +707,10 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *APIConfig, cfg *Con
 		"WorldviewContext": worldviewContext,
 		"OriginalContent":  ch.Content,
 		"UserFeedback":     userFeedback,
+		"ParagraphLocks":   paragraphLockInstructions,
 	})
 	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.WritingPOV}}", formatWritingPOVBlock(cfg.Story.WritingPOV, lang))
+	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.ParagraphLocks}}", paragraphLockInstructions)
 
 	systemPrompt := state.CorePrompt
 	if systemPrompt == "" {
@@ -724,7 +727,90 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *APIConfig, cfg *Con
 	if err != nil {
 		return "", err
 	}
-	return stripChapterMetaProse(content, lang), nil
+	return mergeLockedParagraphs(ch.Content, stripChapterMetaProse(content, lang), ch.ParagraphLocks), nil
+}
+
+func splitContentParagraphs(content string) []string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+	parts := strings.Split(content, "\n\n")
+	paragraphs := make([]string, 0, len(parts))
+	for _, part := range parts {
+		p := strings.TrimSpace(part)
+		if p != "" {
+			paragraphs = append(paragraphs, p)
+		}
+	}
+	return paragraphs
+}
+
+func paragraphLockSet(locks []int) map[int]bool {
+	set := make(map[int]bool, len(locks))
+	for _, n := range locks {
+		if n > 0 {
+			set[n] = true
+		}
+	}
+	return set
+}
+
+func buildParagraphLockInstructions(content string, locks []int, lang string) string {
+	paragraphs := splitContentParagraphs(content)
+	lockSet := paragraphLockSet(locks)
+	if len(paragraphs) == 0 || len(lockSet) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	if NormalizeLanguage(lang) == LangEN {
+		sb.WriteString("\n[Locked paragraphs]\nThe following paragraph numbers are locked. Keep their text exactly unchanged. Do not rewrite, split, merge, move, delete, or paraphrase them. You may only revise unlocked paragraphs.\n")
+	} else {
+		sb.WriteString("\n【锁定段落】\n以下段落编号已锁定，必须逐字保持原样。不得改写、拆分、合并、移动、删除或转述这些段落。只能修改未锁定段落。\n")
+	}
+	for i, p := range paragraphs {
+		num := i + 1
+		if lockSet[num] {
+			sb.WriteString(fmt.Sprintf("P%d: %s\n", num, p))
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func mergeLockedParagraphs(original, revised string, locks []int) string {
+	lockSet := paragraphLockSet(locks)
+	if len(lockSet) == 0 {
+		return revised
+	}
+	originalParagraphs := splitContentParagraphs(original)
+	revisedParagraphs := splitContentParagraphs(revised)
+	if len(originalParagraphs) == 0 || len(revisedParagraphs) == 0 {
+		return revised
+	}
+	for num := range lockSet {
+		idx := num - 1
+		if idx >= 0 && idx < len(originalParagraphs) && idx < len(revisedParagraphs) {
+			revisedParagraphs[idx] = originalParagraphs[idx]
+		}
+	}
+	return strings.Join(revisedParagraphs, "\n\n")
+}
+
+func SetChapterParagraphLocks(state *Progress, chapterNum int, locks []int) error {
+	for i := range state.Chapters {
+		if state.Chapters[i].Num == chapterNum {
+			maxParagraphs := len(splitContentParagraphs(state.Chapters[i].Content))
+			lockSet := paragraphLockSet(locks)
+			state.Chapters[i].ParagraphLocks = state.Chapters[i].ParagraphLocks[:0]
+			for n := 1; n <= maxParagraphs; n++ {
+				if lockSet[n] {
+					state.Chapters[i].ParagraphLocks = append(state.Chapters[i].ParagraphLocks, n)
+				}
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("章节 %d 不存在", chapterNum)
 }
 
 func reviseSubsequentOutlines(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, currentIdx int, userFeedback string) error {

@@ -65,7 +65,7 @@ API configuration is shared across all projects. The Config page supports multip
 
 1. **Configure the story**: on the Config page set genre, chapter count, target words per chapter, writing style, etc. Characters / world / organizations / relations can be added manually, or generated in one click with "AI generate settings".
 2. **Generate the outline**: on the Outline page, click generate. The AI outputs the full chapter outline. You can ask for revisions globally, or edit individual chapters inline. Lock any chapter you are happy with; AI outline revision, regeneration, and settings reconciliation will leave it unchanged. Confirm when satisfied.
-3. **Write chapter by chapter**: on the Writing page, click generate. The AI streams the prose → produces a summary → fact-checks → waits for your review. Confirm to move on, leave feedback to revise, or reject the draft to clear it and return the chapter to pending.
+3. **Write chapter by chapter**: on the Writing page, click generate. The AI streams the prose → produces a summary → fact-checks → waits for your review. The preview labels paragraphs as P1/P2/etc.; lock paragraphs you like (including lock all / unlock all), then revision only changes unlocked paragraphs. You can also confirm to move on, or reject the draft to clear it and return the chapter to pending.
 4. **Want it hands-free?** Toggle "Auto-confirm": the AI will keep writing chapter after chapter until done. You can toggle it off at any time.
 
 ### Choosing the project language

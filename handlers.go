@@ -894,6 +894,39 @@ func (h *Handlers) PostChapterReject(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, h.state)
 }
 
+func (h *Handlers) PutChapterParagraphLocks(w http.ResponseWriter, r *http.Request) {
+	if h.rejectIfTaskRunning(w, r) {
+		return
+	}
+
+	numStr := r.PathValue("num")
+	var num int
+	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_chapter_num")
+		return
+	}
+
+	var body struct {
+		Locks []int `json:"locks"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+
+	if err := SetChapterParagraphLocks(h.state, num, body.Locks); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if err := SaveProgress(h.progressPath, h.state); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_progress_failed", err.Error())
+		return
+	}
+
+	h.broadcastProgress()
+	h.writeJSON(w, http.StatusOK, h.state)
+}
+
 func (h *Handlers) PostChapterEdit(w http.ResponseWriter, r *http.Request) {
 	if h.rejectIfTaskRunning(w, r) {
 		return
