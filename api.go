@@ -42,6 +42,11 @@ type ChatResponse struct {
 	Usage *tokenUsage `json:"usage,omitempty"`
 }
 
+type ModelInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
 func hasAPIVersionSegment(u string) bool {
 	for _, seg := range strings.Split(u, "/") {
 		if len(seg) >= 2 && seg[0] == 'v' && seg[1] >= '0' && seg[1] <= '9' {
@@ -120,6 +125,75 @@ func FetchModelContextWindow(apiCfg *APIConfig) int {
 		return 0
 	}
 	return result.ContextWindow
+}
+
+func FetchModels(apiCfg *APIConfig) ([]ModelInfo, error) {
+	if apiCfg == nil || strings.TrimSpace(apiCfg.BaseURL) == "" {
+		return nil, fmt.Errorf("API Base URL 未配置")
+	}
+	modelsURL := resolveAPIBase(apiCfg.BaseURL, apiCfg.URLStrict) + "/models"
+
+	req, err := http.NewRequest("GET", modelsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if apiCfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiCfg.APIKey)
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("模型列表请求失败，状态码: %d, 返回内容: %s", resp.StatusCode, string(body))
+	}
+
+	var openAIResp struct {
+		Data []ModelInfo `json:"data"`
+	}
+	if err := json.Unmarshal(body, &openAIResp); err == nil && len(openAIResp.Data) > 0 {
+		return normalizeModelList(openAIResp.Data), nil
+	}
+
+	var models []ModelInfo
+	if err := json.Unmarshal(body, &models); err == nil && len(models) > 0 {
+		return normalizeModelList(models), nil
+	}
+
+	var ids []string
+	if err := json.Unmarshal(body, &ids); err == nil && len(ids) > 0 {
+		models = make([]ModelInfo, 0, len(ids))
+		for _, id := range ids {
+			models = append(models, ModelInfo{ID: id, Name: id})
+		}
+		return normalizeModelList(models), nil
+	}
+
+	return nil, fmt.Errorf("无法解析模型列表响应: %s", string(body))
+}
+
+func normalizeModelList(models []ModelInfo) []ModelInfo {
+	out := make([]ModelInfo, 0, len(models))
+	seen := make(map[string]bool)
+	for _, m := range models {
+		m.ID = strings.TrimSpace(m.ID)
+		if m.ID == "" || seen[m.ID] {
+			continue
+		}
+		if m.Name == "" {
+			m.Name = m.ID
+		}
+		seen[m.ID] = true
+		out = append(out, m)
+	}
+	return out
 }
 
 func validateAPIConfig(apiCfg *APIConfig) error {

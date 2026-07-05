@@ -7,13 +7,27 @@ import (
 )
 
 type APIConfig struct {
-	APIKey               string `json:"api_key"`
-	BaseURL              string `json:"base_url"`
-	URLStrict            bool   `json:"url_strict,omitempty"` // true = 不自动插入 /v1，仅补 /chat/completions
-	Model                string `json:"model"`
-	MaxTokens            int    `json:"max_tokens,omitempty"`           // 0 = 模型默认；Agent 调用建议 ≥ 8192
-	HTTPTimeoutSeconds   int    `json:"http_timeout_seconds"`
-	ContextBudgetTokens  int    `json:"context_budget_tokens"` // 全书优化上下文预算，默认 900000
+	APIKey              string       `json:"api_key"`
+	BaseURL             string       `json:"base_url"`
+	URLStrict           bool         `json:"url_strict,omitempty"` // true = 不自动插入 /v1，仅补 /chat/completions
+	Model               string       `json:"model"`
+	MaxTokens           int          `json:"max_tokens,omitempty"` // 0 = 模型默认；Agent 调用建议 ≥ 8192
+	HTTPTimeoutSeconds  int          `json:"http_timeout_seconds"`
+	ContextBudgetTokens int          `json:"context_budget_tokens"` // 全书优化上下文预算，默认 900000
+	ActiveProfileID     string       `json:"active_profile_id,omitempty"`
+	Profiles            []APIProfile `json:"profiles,omitempty"`
+}
+
+type APIProfile struct {
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	APIKey              string `json:"api_key"`
+	BaseURL             string `json:"base_url"`
+	URLStrict           bool   `json:"url_strict,omitempty"`
+	Model               string `json:"model"`
+	MaxTokens           int    `json:"max_tokens,omitempty"`
+	HTTPTimeoutSeconds  int    `json:"http_timeout_seconds"`
+	ContextBudgetTokens int    `json:"context_budget_tokens"`
 }
 
 type Config struct {
@@ -72,10 +86,101 @@ type PromptsConfig struct {
 }
 
 func DefaultAPIConfig() *APIConfig {
-	return &APIConfig{
+	cfg := &APIConfig{
 		HTTPTimeoutSeconds:  300,
 		ContextBudgetTokens: defaultContextBudgetTokens,
 	}
+	normalizeAPIConfig(cfg)
+	return cfg
+}
+
+func normalizeAPIConfig(cfg *APIConfig) {
+	if cfg == nil {
+		return
+	}
+	if cfg.HTTPTimeoutSeconds <= 0 {
+		cfg.HTTPTimeoutSeconds = 300
+	}
+	if cfg.ContextBudgetTokens <= 0 {
+		cfg.ContextBudgetTokens = defaultContextBudgetTokens
+	}
+	if len(cfg.Profiles) == 0 {
+		cfg.ActiveProfileID = "default"
+		cfg.Profiles = []APIProfile{profileFromAPIConfig(cfg, "default", "Default")}
+		return
+	}
+	syncActiveProfileFromTopLevel(cfg)
+
+	found := false
+	for i := range cfg.Profiles {
+		normalizeAPIProfile(&cfg.Profiles[i])
+		if cfg.Profiles[i].ID == cfg.ActiveProfileID {
+			applyAPIProfile(cfg, cfg.Profiles[i])
+			found = true
+		}
+	}
+	if !found {
+		cfg.ActiveProfileID = cfg.Profiles[0].ID
+		applyAPIProfile(cfg, cfg.Profiles[0])
+	}
+}
+
+func syncActiveProfileFromTopLevel(cfg *APIConfig) {
+	if cfg.ActiveProfileID == "" {
+		if len(cfg.Profiles) > 0 {
+			cfg.ActiveProfileID = cfg.Profiles[0].ID
+		} else {
+			cfg.ActiveProfileID = "default"
+		}
+	}
+	for i := range cfg.Profiles {
+		if cfg.Profiles[i].ID == cfg.ActiveProfileID {
+			name := cfg.Profiles[i].Name
+			cfg.Profiles[i] = profileFromAPIConfig(cfg, cfg.ActiveProfileID, name)
+			normalizeAPIProfile(&cfg.Profiles[i])
+			return
+		}
+	}
+	cfg.Profiles = append(cfg.Profiles, profileFromAPIConfig(cfg, cfg.ActiveProfileID, cfg.ActiveProfileID))
+}
+
+func normalizeAPIProfile(p *APIProfile) {
+	if p.ID == "" {
+		p.ID = "default"
+	}
+	if p.Name == "" {
+		p.Name = p.ID
+	}
+	if p.HTTPTimeoutSeconds <= 0 {
+		p.HTTPTimeoutSeconds = 300
+	}
+	if p.ContextBudgetTokens <= 0 {
+		p.ContextBudgetTokens = defaultContextBudgetTokens
+	}
+}
+
+func profileFromAPIConfig(cfg *APIConfig, id, name string) APIProfile {
+	return APIProfile{
+		ID:                  id,
+		Name:                name,
+		APIKey:              cfg.APIKey,
+		BaseURL:             cfg.BaseURL,
+		URLStrict:           cfg.URLStrict,
+		Model:               cfg.Model,
+		MaxTokens:           cfg.MaxTokens,
+		HTTPTimeoutSeconds:  cfg.HTTPTimeoutSeconds,
+		ContextBudgetTokens: cfg.ContextBudgetTokens,
+	}
+}
+
+func applyAPIProfile(cfg *APIConfig, p APIProfile) {
+	cfg.APIKey = p.APIKey
+	cfg.BaseURL = p.BaseURL
+	cfg.URLStrict = p.URLStrict
+	cfg.Model = p.Model
+	cfg.MaxTokens = p.MaxTokens
+	cfg.HTTPTimeoutSeconds = p.HTTPTimeoutSeconds
+	cfg.ContextBudgetTokens = p.ContextBudgetTokens
 }
 
 func DefaultConfig() *Config {
@@ -116,13 +221,13 @@ func LoadAPIConfig(path string) (*APIConfig, error) {
 		return nil, fmt.Errorf("解析API配置文件失败: %w", err)
 	}
 
-	if cfg.HTTPTimeoutSeconds <= 0 {
-		cfg.HTTPTimeoutSeconds = 300
-	}
-	if cfg.ContextBudgetTokens <= 0 {
+	shouldDetectContextWindow := cfg.ContextBudgetTokens <= 0
+	normalizeAPIConfig(&cfg)
+	if shouldDetectContextWindow {
 		// 先尝试从 API 获取模型的上下文窗口
 		if window := FetchModelContextWindow(&cfg); window > 0 {
 			cfg.ContextBudgetTokens = window
+			syncActiveProfileFromTopLevel(&cfg)
 		} else {
 			cfg.ContextBudgetTokens = defaultContextBudgetTokens
 		}

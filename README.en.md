@@ -56,10 +56,10 @@ Then open `http://localhost:48090` (the port can be overridden via the `PORT` en
 On first launch you will be asked to create a project. Once a project is open, the "Config" page asks for:
 
 - **API base URL**: OpenAI-compatible base URL (the app appends `/chat/completions`), e.g. `https://api.deepseek.com`, `https://api.openai.com/v1`, `https://api.z.ai/api/paas/v4`; a bare hostname gets `/v1` added automatically. For non-standard paths (e.g. z.ai Coding Plan), enable **Strict URL mode**
-- **Model name**: e.g. `deepseek-chat`, `gpt-4o`
+- **Model name**: e.g. `deepseek-chat`, `gpt-4o`; you can also click Fetch to load `/models` from the provider and pick one
 - **API key**: leave empty for local models
 
-API configuration is shared across all projects.
+API configuration is shared across all projects. The Config page supports multiple API profiles, so you can switch between providers / local models; the selected profile is used for subsequent AI tasks.
 
 ### 4. Start writing
 

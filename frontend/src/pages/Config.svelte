@@ -39,6 +39,8 @@
   let localApiCfg = { base_url: '', url_strict: false, model: '', api_key: '', http_timeout_seconds: 300, max_tokens: 0, context_budget_tokens: 900000 };
   let localStoryCfg = { type: '', title: '', chapter_count: 30, target_words_per_chapter: 2500, writing_style: '', writing_pov: '', story_synopsis: '' };
   let testingApi = false;
+  let loadingModels = false;
+  let apiModels = [];
 
   $: resolvedChatURL = resolveChatCompletionsURL(localApiCfg.base_url, !!localApiCfg.url_strict);
 
@@ -49,10 +51,12 @@
     const snap = JSON.stringify($apiConfig);
     if (snap !== apiCfgSnapshot) {
       localApiCfg = {
-        base_url: '', url_strict: false, model: '', api_key: '', http_timeout_seconds: 300, max_tokens: 0, context_budget_tokens: 900000,
+        base_url: '', url_strict: false, model: '', api_key: '', http_timeout_seconds: 300, max_tokens: 0, context_budget_tokens: 900000, active_profile_id: 'default', profiles: [],
         ...$apiConfig,
         url_strict: !!$apiConfig.url_strict,
       };
+      localApiCfg.profiles = ensureApiProfiles(localApiCfg);
+      if (!localApiCfg.active_profile_id) localApiCfg.active_profile_id = localApiCfg.profiles[0]?.id || 'default';
       apiCfgSnapshot = snap;
     }
   }
@@ -113,8 +117,8 @@
 
   async function saveAPIConfig() {
     try {
-      await api('PUT', '/api/config/api', localApiCfg);
-      apiConfig.set({ ...localApiCfg });
+      const saved = await api('PUT', '/api/config/api', syncActiveProfile(localApiCfg));
+      apiConfig.set(saved);
       addToast($t('config.api.saved'), 'success');
     } catch (e) { addToast(e.message, 'error'); }
   }
@@ -129,6 +133,112 @@
     } finally {
       testingApi = false;
     }
+  }
+
+  function ensureApiProfiles(cfg) {
+    const profiles = Array.isArray(cfg.profiles) ? cfg.profiles.map(p => ({ ...p })) : [];
+    if (profiles.length === 0) {
+      profiles.push({
+        id: cfg.active_profile_id || 'default',
+        name: $t('config.api.defaultProfile'),
+        base_url: cfg.base_url || '',
+        url_strict: !!cfg.url_strict,
+        model: cfg.model || '',
+        api_key: cfg.api_key || '',
+        http_timeout_seconds: cfg.http_timeout_seconds || 300,
+        max_tokens: cfg.max_tokens || 0,
+        context_budget_tokens: cfg.context_budget_tokens || 900000,
+      });
+    }
+    return profiles;
+  }
+
+  function profileFromCurrent(cfg, profile) {
+    return {
+      ...(profile || {}),
+      id: cfg.active_profile_id || profile?.id || 'default',
+      name: profile?.name || $t('config.api.defaultProfile'),
+      base_url: cfg.base_url || '',
+      url_strict: !!cfg.url_strict,
+      model: cfg.model || '',
+      api_key: cfg.api_key || '',
+      http_timeout_seconds: Number(cfg.http_timeout_seconds) || 300,
+      max_tokens: Number(cfg.max_tokens) || 0,
+      context_budget_tokens: Number(cfg.context_budget_tokens) || 900000,
+    };
+  }
+
+  function syncActiveProfile(cfg) {
+    const profiles = ensureApiProfiles(cfg);
+    const activeId = cfg.active_profile_id || profiles[0]?.id || 'default';
+    const idx = profiles.findIndex(p => p.id === activeId);
+    if (idx >= 0) profiles[idx] = profileFromCurrent({ ...cfg, active_profile_id: activeId }, profiles[idx]);
+    return { ...cfg, active_profile_id: activeId, profiles };
+  }
+
+  function applyProfile(profileId) {
+    const synced = syncActiveProfile(localApiCfg);
+    const profile = synced.profiles.find(p => p.id === profileId);
+    if (!profile) return;
+    localApiCfg = {
+      ...synced,
+      active_profile_id: profile.id,
+      base_url: profile.base_url || '',
+      url_strict: !!profile.url_strict,
+      model: profile.model || '',
+      api_key: profile.api_key || '',
+      http_timeout_seconds: profile.http_timeout_seconds || 300,
+      max_tokens: profile.max_tokens || 0,
+      context_budget_tokens: profile.context_budget_tokens || 900000,
+    };
+    apiModels = [];
+  }
+
+  function addAPIProfile() {
+    const synced = syncActiveProfile(localApiCfg);
+    const id = 'api-' + Date.now();
+    const profile = {
+      id,
+      name: $t('config.api.newProfileName', { n: synced.profiles.length + 1 }),
+      base_url: '',
+      url_strict: false,
+      model: '',
+      api_key: '',
+      http_timeout_seconds: 300,
+      max_tokens: 0,
+      context_budget_tokens: synced.context_budget_tokens || 900000,
+    };
+    localApiCfg = { ...synced, profiles: [...synced.profiles, profile] };
+    applyProfile(id);
+  }
+
+  function deleteAPIProfile() {
+    const synced = syncActiveProfile(localApiCfg);
+    if (synced.profiles.length <= 1) {
+      addToast($t('config.api.deleteLastProfile'), 'error');
+      return;
+    }
+    const activeId = synced.active_profile_id;
+    const profiles = synced.profiles.filter(p => p.id !== activeId);
+    localApiCfg = { ...synced, profiles, active_profile_id: profiles[0].id };
+    applyProfile(profiles[0].id);
+  }
+
+  function renameActiveProfile(name) {
+    const synced = syncActiveProfile(localApiCfg);
+    const profiles = synced.profiles.map(p => p.id === synced.active_profile_id ? { ...p, name } : p);
+    localApiCfg = { ...synced, profiles };
+  }
+
+  async function fetchModels() {
+    loadingModels = true;
+    try {
+      const res = await api('POST', '/api/config/api/models', syncActiveProfile(localApiCfg));
+      apiModels = res.models || [];
+      if (apiModels.length === 0) addToast($t('config.api.modelsEmpty'), 'info');
+      else addToast($t('config.api.modelsLoaded', { n: apiModels.length }), 'success');
+    } catch (e) { addToast(e.message, 'error'); }
+    finally { loadingModels = false; }
   }
 
   // 直接保存故事配置（不经过 AI），存在已确认章节且关键设定有变化时提示协调
@@ -376,11 +486,27 @@
       <div class="card-body p-4 gap-2">
         <h3 class="card-title text-base">{$t('config.api.title')}</h3>
         <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+          <div class="col-span-2 grid grid-cols-[1fr_auto_auto] gap-2 items-end">
+            <div>
+              <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.profile')}</span>
+              <select class="select select-sm w-full" value={localApiCfg.active_profile_id} on:change={(e) => applyProfile(e.currentTarget.value)} disabled={$taskRunning || testingApi || loadingModels}>
+                {#each ensureApiProfiles(localApiCfg) as profile}
+                  <option value={profile.id}>{profile.name || profile.id}</option>
+                {/each}
+              </select>
+            </div>
+            <button class="btn btn-ghost btn-xs" on:click={addAPIProfile} disabled={$taskRunning || testingApi || loadingModels}>{$t('config.api.addProfile')}</button>
+            <button class="btn btn-ghost btn-xs text-error" on:click={deleteAPIProfile} disabled={$taskRunning || testingApi || loadingModels}>{$t('common.delete')}</button>
+          </div>
+          <div class="col-span-2">
+            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.profileName')}</span>
+            <input type="text" class="input input-sm w-full" value={ensureApiProfiles(localApiCfg).find(p => p.id === localApiCfg.active_profile_id)?.name || ''} on:input={(e) => renameActiveProfile(e.currentTarget.value)} disabled={$taskRunning || testingApi || loadingModels} />
+          </div>
           <div class="col-span-2">
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.baseUrl')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.openai.com/v1" disabled={$taskRunning || testingApi} />
+            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.openai.com/v1" disabled={$taskRunning || testingApi || loadingModels} />
             <label class="label cursor-pointer justify-start gap-2 py-1 px-0 min-h-0">
-              <input type="checkbox" class="toggle toggle-xs" bind:checked={localApiCfg.url_strict} disabled={$taskRunning || testingApi} />
+              <input type="checkbox" class="toggle toggle-xs" bind:checked={localApiCfg.url_strict} disabled={$taskRunning || testingApi || loadingModels} />
               <span class="label-text text-xs text-base-content/60">{$t('config.api.urlStrict')}</span>
             </label>
             <p class="text-xs text-base-content/45 mb-1">{$t('config.api.urlStrictHint')}</p>
@@ -392,23 +518,36 @@
           </div>
           <div>
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.model')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi} />
+            <div class="join w-full">
+              {#if apiModels.length > 0}
+                <select class="select select-sm join-item flex-1 min-w-0" bind:value={localApiCfg.model} disabled={$taskRunning || testingApi || loadingModels}>
+                  {#each apiModels as model}
+                    <option value={model.id}>{model.name || model.id}</option>
+                  {/each}
+                </select>
+              {:else}
+                <input type="text" class="input input-sm join-item flex-1 min-w-0" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi || loadingModels} />
+              {/if}
+              <button class="btn btn-outline btn-sm join-item" on:click={fetchModels} disabled={$taskRunning || testingApi || loadingModels || !localApiCfg.base_url.trim()}>
+                {#if loadingModels}<span class="loading loading-spinner loading-xs"></span>{:else}{$t('config.api.fetchModels')}{/if}
+              </button>
+            </div>
           </div>
           <div>
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.timeout')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.http_timeout_seconds} disabled={$taskRunning || testingApi} />
+            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.http_timeout_seconds} disabled={$taskRunning || testingApi || loadingModels} />
           </div>
           <div>
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.maxTokens')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.max_tokens} placeholder="{$t('config.api.maxTokens.placeholder')}" disabled={$taskRunning || testingApi} title={$t('config.api.maxTokens.tooltip')} />
+            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.max_tokens} placeholder="{$t('config.api.maxTokens.placeholder')}" disabled={$taskRunning || testingApi || loadingModels} title={$t('config.api.maxTokens.tooltip')} />
           </div>
           <div class="col-span-2">
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.budget')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.context_budget_tokens} placeholder="900000" disabled={$taskRunning || testingApi} title={$t('config.api.budget.tooltip')} />
+            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.context_budget_tokens} placeholder="900000" disabled={$taskRunning || testingApi || loadingModels} title={$t('config.api.budget.tooltip')} />
           </div>
           <div class="col-span-2">
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.key')}</span>
-            <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi} />
+            <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi || loadingModels} />
           </div>
         </div>
         <div class="flex justify-end gap-2">

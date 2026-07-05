@@ -285,6 +285,7 @@ func (h *Handlers) PutAPIConfig(w http.ResponseWriter, r *http.Request) {
 			newCfg.ContextBudgetTokens = defaultContextBudgetTokens
 		}
 	}
+	normalizeAPIConfig(&newCfg)
 
 	data, err := json.MarshalIndent(newCfg, "", "  ")
 	if err != nil {
@@ -298,6 +299,25 @@ func (h *Handlers) PutAPIConfig(w http.ResponseWriter, r *http.Request) {
 
 	h.apiCfg = &newCfg
 	h.writeJSON(w, http.StatusOK, h.apiCfg)
+}
+
+func (h *Handlers) PostAPIModels(w http.ResponseWriter, r *http.Request) {
+	if h.rejectIfTaskRunning(w, r) {
+		return
+	}
+	var reqCfg APIConfig
+	if err := json.NewDecoder(r.Body).Decode(&reqCfg); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	normalizeAPIConfig(&reqCfg)
+
+	models, err := FetchModels(&reqCfg)
+	if err != nil {
+		h.writeErrorReq(w, r, http.StatusBadGateway, "api_test_failed", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{"models": models})
 }
 
 func (h *Handlers) PostAPITest(w http.ResponseWriter, r *http.Request) {

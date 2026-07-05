@@ -56,10 +56,10 @@
 首次进入会提示创建项目。创建后在「配置」页填写：
 
 - **API 地址**：任意 OpenAI 兼容接口的 Base URL（程序会自动补 `/chat/completions`），如 `https://api.deepseek.com`、`https://api.openai.com/v1`、`https://api.z.ai/api/paas/v4`；仅填域名时会自动补 `/v1`。非标准路径（如 z.ai Coding Plan）可开启「严格 URL 模式」
-- **模型名称**：如 `deepseek-chat`、`gpt-4o` 等
+- **模型名称**：如 `deepseek-chat`、`gpt-4o` 等；也可以点击「获取」从接口的 `/models` 拉取模型列表后选择
 - **API Key**：本地模型可留空
 
-API 配置全局共享，所有项目通用。
+API 配置全局共享，所有项目通用。配置页支持保存多个接口配置，可在不同供应商 / 本地模型之间切换；当前选中的接口会用于所有后续 AI 任务。
 
 ### 4. 开始创作
 
