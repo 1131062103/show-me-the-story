@@ -96,6 +96,10 @@ var messageCatalog = map[string]map[string]string{
 		LangZH: "第 %d 章已确认。",
 		LangEN: "Chapter %d confirmed.",
 	},
+	"log.chapter_rejected": {
+		LangZH: "第 %d 章稿件已不采纳，已退回待写作。",
+		LangEN: "Chapter %d draft rejected and returned to pending.",
+	},
 	"log.chapter_revising": {
 		LangZH: "正在根据意见修改当前章节...",
 		LangEN: "Revising current chapter based on feedback...",

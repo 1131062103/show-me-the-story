@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { api } from '../lib/api.js';
-  import { progress, taskRunning, streamingContent, streamingChapterIdx, selectedChapter, autoConfirm, addToast, confirmModal, currentPage } from '../lib/stores.js';
+  import { progress, taskRunning, streamingContent, streamingChapterIdx, selectedChapter, autoConfirm, addToast, showConfirm, currentPage } from '../lib/stores.js';
   import { t } from '../lib/i18n/index.js';
   import { countProseUnits } from '../lib/proseUnits.js';
   import PostProcessPanel from '../components/PostProcessPanel.svelte';
@@ -140,6 +140,20 @@
         selectedChapter.set(next.current_chapter_index);
       }
     } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  function doReject() {
+    if (!ch) return;
+    const chapterNum = ch.num;
+    showConfirm($t('writing.toasts.rejectAsk', { num: chapterNum }), async () => {
+      try {
+        progress.set(await api('POST', '/api/chapter/reject'));
+        selectedChapter.set(currentIdx);
+        showRevise = false;
+        reviseFeedback = '';
+        addToast($t('writing.toasts.rejected', { num: chapterNum }), 'success');
+      } catch (e) { addToast(e.message, 'error'); }
+    });
   }
 
   async function doRevise() {
@@ -386,6 +400,7 @@
                 {/if}
                 {#if ch.status === 'review' && isCurrent}
                   <button class="btn btn-success btn-sm" on:click={doConfirm} disabled={$taskRunning}>{$t('writing.btn.confirm')}</button>
+                  <button class="btn btn-ghost btn-sm text-error" on:click={doReject} disabled={$taskRunning}>{$t('writing.btn.reject')}</button>
                 {/if}
                 {#if ch.content && ch.status !== 'writing'}
                   <button class="btn btn-ghost btn-sm" on:click={() => showRevise = !showRevise} disabled={$taskRunning}>{$t('writing.btn.revise')}</button>

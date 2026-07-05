@@ -872,6 +872,28 @@ func (h *Handlers) PostChapterConfirm(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, h.state)
 }
 
+func (h *Handlers) PostChapterReject(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+
+	num, err := RejectCurrentChapterDraft(h.state, h.projectDir())
+	if err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+
+	if err := SaveProgress(h.progressPath, h.state); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_progress_failed", err.Error())
+		return
+	}
+
+	h.logger.SuccessKey("log.chapter_rejected", num)
+	h.broadcastProgress()
+	h.writeJSON(w, http.StatusOK, h.state)
+}
+
 func (h *Handlers) PostChapterEdit(w http.ResponseWriter, r *http.Request) {
 	if h.rejectIfTaskRunning(w, r) {
 		return

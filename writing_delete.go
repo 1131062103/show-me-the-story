@@ -10,6 +10,7 @@ var (
 	ErrNoChaptersToDelete         = errors.New("no chapters to delete")
 	ErrWritingChapterCannotDelete = errors.New("writing chapter cannot delete")
 	ErrDeleteFrontierUnavailable  = errors.New("delete frontier unavailable")
+	ErrNoReviewChapterToReject    = errors.New("no review chapter to reject")
 )
 
 // resolveDeleteChapterTarget returns the chapter index eligible for delete_chapter:
@@ -98,6 +99,20 @@ func DeleteFrontierChapter(state *Progress, projectDir string) (int, error) {
 	num := state.Chapters[idx].Num
 	clearChapterContentAt(state, projectDir, idx)
 	adjustCurrentChapterIndexAfterDelete(state, idx)
+	return num, nil
+}
+
+func RejectCurrentChapterDraft(state *Progress, projectDir string) (int, error) {
+	if state == nil || state.Phase != "writing" || state.CurrentChapterIndex < 0 || state.CurrentChapterIndex >= len(state.Chapters) {
+		return 0, ErrNoReviewChapterToReject
+	}
+	idx := state.CurrentChapterIndex
+	if state.Chapters[idx].Status != StatusReview {
+		return 0, ErrNoReviewChapterToReject
+	}
+	num := state.Chapters[idx].Num
+	clearChapterContentAt(state, projectDir, idx)
+	state.CurrentChapterIndex = idx
 	return num, nil
 }
 
