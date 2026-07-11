@@ -12,6 +12,7 @@ const (
 	EditOpReplaceLines         EditOp = "replace_lines"          // Replace a range of lines
 	EditOpDeleteLines          EditOp = "delete_lines"           // Delete a range of lines
 	EditOpReplaceText          EditOp = "replace_text"           // Find and replace a text snippet
+	EditOpReplaceAll           EditOp = "replace_all"            // Replace the whole chapter content
 	EditOpInsertAfterLine      EditOp = "insert_after_line"      // Insert content after a line
 	EditOpReplaceParagraphs    EditOp = "replace_paragraphs"     // Replace a range of paragraphs
 	EditOpDeleteParagraphs     EditOp = "delete_paragraphs"      // Delete a range of paragraphs
@@ -90,6 +91,20 @@ func EditChapterContent(state *Progress, req EditChapterContentRequest) (int, er
 			return 0, fmt.Errorf("未找到匹配文本（长度 %d 字符）", len(req.OldText))
 		}
 		ch.Content = ch.Content[:idx] + req.NewText + ch.Content[idx+len(req.OldText):]
+
+	case EditOpReplaceAll:
+		if strings.TrimSpace(req.NewText) == "" {
+			return 0, fmt.Errorf("正文不能为空")
+		}
+		ch.Content = strings.TrimSpace(req.NewText)
+		maxParagraphs := len(splitContentParagraphs(ch.Content))
+		lockSet := paragraphLockSet(ch.ParagraphLocks)
+		ch.ParagraphLocks = ch.ParagraphLocks[:0]
+		for n := 1; n <= maxParagraphs; n++ {
+			if lockSet[n] {
+				ch.ParagraphLocks = append(ch.ParagraphLocks, n)
+			}
+		}
 
 	case EditOpInsertAfterLine:
 		if req.Line < 0 || req.Line > totalLines {

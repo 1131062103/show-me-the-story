@@ -57,6 +57,7 @@
   // 流式期间 $streamingContent 只含尾部窗口（性能保护），全文在生成结束后由 progress 拉取
   $: displayContent = isStreamingThis ? $streamingContent : (ch?.content || '');
   $: displayParagraphs = !isStreamingThis && displayContent ? splitParagraphs(displayContent) : [];
+  $: canManualEditContent = !!(ch?.content && !isStreamingThis && ch.status !== 'writing');
   $: paragraphLocks = ch?.paragraph_locks || [];
   $: paragraphLockSet = new Set(paragraphLocks);
   $: chapterWordCount = ch?.content ? countProseUnits(ch.content) : 0;
@@ -106,6 +107,9 @@
   let showRevise = false;
   let contentEl;
   let hasPolishSkills = false;
+  let editingContent = false;
+  let editContent = '';
+  let savingContent = false;
 
   // 流式输出时自动滚动到底部：合并到 rAF，每帧最多一次，避免高频强制重排
   let scrollPending = false;
@@ -123,6 +127,8 @@
     selectedChapter.set(i);
     showRevise = false;
     reviseFeedback = '';
+    editingContent = false;
+    editContent = '';
   }
 
   async function doGenerate() {
@@ -193,6 +199,36 @@
     } catch (e) { addToast($t('common.copy.failed'), 'error'); }
   }
 
+  function startContentEdit() {
+    if (!canManualEditContent || !ch) return;
+    editContent = ch.content || '';
+    editingContent = true;
+    showRevise = false;
+  }
+
+  function cancelContentEdit() {
+    editingContent = false;
+    editContent = '';
+  }
+
+  async function saveContentEdit() {
+    if (!ch || savingContent) return;
+    const text = editContent.trim();
+    if (!text) { addToast($t('writing.edit.empty'), 'error'); return; }
+    try {
+      savingContent = true;
+      await api('POST', '/api/chapter/edit', { num: ch.num, operation: 'replace_all', new_text: text });
+      progress.set(await api('GET', '/api/progress'));
+      editingContent = false;
+      editContent = '';
+      addToast($t('writing.toasts.editSaved', { num: ch.num }), 'success');
+    } catch (e) {
+      addToast(e.message, 'error');
+    } finally {
+      savingContent = false;
+    }
+  }
+
   function exportBook() {
     const written = chapters.filter(c => c.content);
     if (written.length === 0) { addToast($t('writing.toasts.exportEmpty'), 'error'); return; }
@@ -238,6 +274,10 @@
 
   function unlockAllParagraphs() {
     saveParagraphLocks([]);
+  }
+
+  function scrollContentTop() {
+    if (contentEl) contentEl.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function smoothTransitions() {
@@ -415,29 +455,60 @@
                     </div>
                   {/if}
                 </div>
-                <div bind:this={contentEl} class="bg-base-300 rounded-lg p-3 text-[15px] reading-area max-h-[calc(100vh-420px)] min-h-[200px] overflow-y-auto max-md:max-h-none">
-                  {#if isStreamingThis}
-                    <div class="chapter-content">{displayContent}</div>
-                    <span class="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5 align-text-bottom"></span>
-                  {:else}
-                    <div class="space-y-3">
-                      {#each displayParagraphs as paragraph, idx}
-                        {@const paragraphNum = idx + 1}
-                        {@const locked = paragraphLockSet.has(paragraphNum)}
-                        <div class="grid grid-cols-[auto_1fr] gap-2 rounded-md px-1.5 py-1 {locked ? 'bg-warning/10 ring-1 ring-warning/20' : ''}">
-                          <div class="flex flex-col items-center gap-1 pt-0.5 select-none">
-                            <span class="text-[11px] leading-none font-mono text-base-content/45">P{paragraphNum}</span>
-                            <button
-                              type="button"
-                              class="btn btn-ghost btn-xs min-h-0 h-5 px-1 text-[11px] {locked ? 'text-warning' : 'text-base-content/35'}"
-                              title={locked ? $t('writing.paragraph.unlockOne') : $t('writing.paragraph.lockOne')}
-                              on:click={() => toggleParagraphLock(paragraphNum)}
-                              disabled={$taskRunning}
-                            >{locked ? '🔒' : '🔓'}</button>
-                          </div>
-                          <p class="whitespace-pre-wrap leading-relaxed m-0">{paragraph}</p>
+                <div class="relative">
+                  {#if (ch.status === 'review' || ch.status === 'accepted') && displayContent}
+                    <button
+                      type="button"
+                      class="btn btn-circle btn-xs chapter-scroll-top-btn"
+                      title="回到顶部"
+                      aria-label="回到顶部"
+                      on:click={scrollContentTop}
+                    >↑</button>
+                  {/if}
+                  {#if editingContent}
+                    <div class="bg-base-300 rounded-lg p-3 space-y-2">
+                      <textarea
+                        class="textarea textarea-bordered w-full min-h-[55vh] text-[15px] leading-relaxed font-normal"
+                        bind:value={editContent}
+                        disabled={$taskRunning || savingContent}
+                        placeholder={$t('writing.edit.placeholder')}
+                      ></textarea>
+                      <div class="flex items-center gap-2 justify-between">
+                        <span class="text-xs text-base-content/40">{$t('writing.edit.hint')}</span>
+                        <div class="flex gap-2">
+                          <button class="btn btn-ghost btn-xs" on:click={cancelContentEdit} disabled={savingContent}>{$t('common.cancel')}</button>
+                          <button class="btn btn-primary btn-xs" on:click={saveContentEdit} disabled={$taskRunning || savingContent || !editContent.trim()}>
+                            {savingContent ? $t('common.saving') : $t('writing.edit.save')}
+                          </button>
                         </div>
-                      {/each}
+                      </div>
+                    </div>
+                  {:else}
+                    <div bind:this={contentEl} class="chapter-reading-window bg-base-300 rounded-lg p-3 text-[15px] reading-area overflow-y-auto">
+                    {#if isStreamingThis}
+                      <div class="chapter-content">{displayContent}</div>
+                      <span class="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5 align-text-bottom"></span>
+                    {:else}
+                      <div class="space-y-3">
+                        {#each displayParagraphs as paragraph, idx}
+                          {@const paragraphNum = idx + 1}
+                          {@const locked = paragraphLockSet.has(paragraphNum)}
+                          <div class="grid grid-cols-[auto_1fr] gap-2 rounded-md px-1.5 py-1 {locked ? 'bg-warning/10 ring-1 ring-warning/20' : ''}">
+                            <div class="flex flex-col items-center gap-1 pt-0.5 select-none">
+                              <span class="text-[11px] leading-none font-mono text-base-content/45">P{paragraphNum}</span>
+                              <button
+                                type="button"
+                                class="btn btn-ghost btn-xs min-h-0 h-5 px-1 text-[11px] {locked ? 'text-warning' : 'text-base-content/35'}"
+                                title={locked ? $t('writing.paragraph.unlockOne') : $t('writing.paragraph.lockOne')}
+                                on:click={() => toggleParagraphLock(paragraphNum)}
+                                disabled={$taskRunning}
+                              >{locked ? '🔒' : '🔓'}</button>
+                            </div>
+                            <p class="whitespace-pre-wrap leading-relaxed m-0">{paragraph}</p>
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
                     </div>
                   {/if}
                 </div>
@@ -461,11 +532,14 @@
                   <button class="btn btn-ghost btn-sm text-error" on:click={doReject} disabled={$taskRunning}>{$t('writing.btn.reject')}</button>
                 {/if}
                 {#if ch.content && ch.status !== 'writing'}
-                  <button class="btn btn-ghost btn-sm" on:click={() => showRevise = !showRevise} disabled={$taskRunning}>{$t('writing.btn.revise')}</button>
-                  {#if hasPolishSkills}
-                    <button class="btn btn-ghost btn-sm" on:click={doPolish} disabled={$taskRunning} title={$t('writing.btn.polish.tip')}>{$t('writing.btn.polish')}</button>
+                  {#if canManualEditContent}
+                    <button class="btn btn-ghost btn-sm" on:click={startContentEdit} disabled={$taskRunning || editingContent}>{$t('writing.btn.editContent')}</button>
                   {/if}
-                  <button class="btn btn-ghost btn-sm" on:click={copyContent}>{$t('writing.btn.copy')}</button>
+                  <button class="btn btn-ghost btn-sm" on:click={() => showRevise = !showRevise} disabled={$taskRunning || editingContent}>{$t('writing.btn.revise')}</button>
+                  {#if hasPolishSkills}
+                    <button class="btn btn-ghost btn-sm" on:click={doPolish} disabled={$taskRunning || editingContent} title={$t('writing.btn.polish.tip')}>{$t('writing.btn.polish')}</button>
+                  {/if}
+                  <button class="btn btn-ghost btn-sm" on:click={copyContent} disabled={editingContent}>{$t('writing.btn.copy')}</button>
                 {/if}
                 <div class="flex-1"></div>
                 <div class="join">

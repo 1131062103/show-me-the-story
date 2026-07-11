@@ -83,6 +83,33 @@ body {
   line-height: 1.8;
 }
 
+/* Writing page: keep chapter prose in a limited inner scroll window */
+.chapter-reading-window {
+  height: clamp(240px, 48vh, 520px);
+  min-height: 240px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.chapter-scroll-top-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  z-index: 5;
+  opacity: 0.82;
+  box-shadow: 0 4px 14px color-mix(in oklch, black 28%, transparent);
+}
+
+.chapter-scroll-top-btn:hover {
+  opacity: 1;
+}
+
+@media (max-width: 768px) {
+  .chapter-reading-window {
+    height: clamp(260px, 55vh, 460px);
+  }
+}
+
 /* Markdown rendered content (chat bubbles) */
 .md-body {
   line-height: 1.7;
