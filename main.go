@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"showmethestory/internal/infra/apiconfig"
 )
 
 var (
@@ -41,11 +43,8 @@ func main() {
 	storysDir := filepath.Join(progDir, "storys")
 	os.MkdirAll(storysDir, 0755)
 
-	// API config: always in progDir
-	apiCfgPath := filepath.Join(progDir, "api.json")
-
 	// Load API config (global, shared across projects)
-	apiCfg, err := LoadAPIConfig(apiCfgPath)
+	apiCfg, err := apiconfig.Load(filepath.Join(progDir, "api.json"))
 	if err != nil {
 		fmt.Printf(" [错误] 加载API配置失败: %v\n", err)
 		os.Exit(1)
@@ -56,12 +55,6 @@ func main() {
 		fmt.Println(" [系统] 请通过 Web UI 配置 API 地址和模型后再使用")
 	}
 
-	// Start with no project selected
-	cfg := DefaultConfig()
-	state := &Progress{Phase: "outline"}
-	settings := &ProjectSettings{}
-	skills := LoadAllSkills(cfg, progDir)
-
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = defaultPort
@@ -69,12 +62,9 @@ func main() {
 		port = ":" + port
 	}
 
-	logger := NewLogBroadcaster()
-	defer logger.Close()
-
 	fmt.Printf(" [系统] 版本: %s\n", version)
 	fmt.Printf(" [系统] 程序目录: %s\n", progDir)
 	fmt.Printf(" [系统] 项目目录: %s\n", storysDir)
 
-	startWebServer(apiCfg, apiCfgPath, cfg, state, settings, skills, "", logger, port, progDir, version)
+	startWebServer(apiCfg, port, progDir, version)
 }

@@ -16,6 +16,8 @@
   let showWvForm = false;
   let charCollapse = false;
   let wvCollapse = false;
+  let styleCollapse = false;
+  let synopsisCollapse = false;
 
   let charName = '', charAge = '', charAppearance = '', charPersonality = '', charBackground = '', charMotivation = '', charAbilities = '', charNotes = '';
   let wvName = '', wvCategory = 'other', wvDescription = '', wvTags = '';
@@ -599,29 +601,43 @@
   <!-- Writing Style & POV -->
   <div class="card bg-base-200 shadow-sm">
     <div class="card-body p-4 gap-2">
-      <h3 class="card-title text-base">{$t('config.style.title')}</h3>
-      <div>
-        <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.style.label')}</span>
-        <textarea class="textarea w-full h-28 text-base" bind:value={localStoryCfg.writing_style} placeholder={$t('config.style.placeholder')} disabled={$taskRunning}></textarea>
+      <!-- svelte-ignore a11y-click-events-have-key-events -->
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
+      <div class="flex justify-between items-center cursor-pointer select-none" on:click={() => styleCollapse = !styleCollapse}>
+        <h3 class="card-title text-base">{$t('config.style.title')}</h3>
+        <svg class="w-4 h-4 text-base-content/40 transition-transform" class:rotate-180={styleCollapse} viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
       </div>
-      <div>
-        <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.pov.label')}</span>
-        <textarea class="textarea w-full h-20 text-base" bind:value={localStoryCfg.writing_pov} placeholder={$t('config.pov.placeholder')} disabled={$taskRunning}></textarea>
-      </div>
-      <div class="flex justify-end">
-        <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
-      </div>
+      {#if !styleCollapse}
+        <div>
+          <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.style.label')}</span>
+          <textarea class="textarea w-full h-28 text-base" bind:value={localStoryCfg.writing_style} placeholder={$t('config.style.placeholder')} disabled={$taskRunning}></textarea>
+        </div>
+        <div>
+          <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.pov.label')}</span>
+          <textarea class="textarea w-full h-20 text-base" bind:value={localStoryCfg.writing_pov} placeholder={$t('config.pov.placeholder')} disabled={$taskRunning}></textarea>
+        </div>
+        <div class="flex justify-end">
+          <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
+        </div>
+      {/if}
     </div>
   </div>
 
   <!-- Story Synopsis -->
   <div class="card bg-base-200 shadow-sm">
     <div class="card-body p-4 gap-2">
-      <h3 class="card-title text-base">{$t('config.synopsis.title')}</h3>
-      <textarea class="textarea w-full h-40 text-base" bind:value={localStoryCfg.story_synopsis} placeholder={$t('config.synopsis.placeholder')} disabled={$taskRunning}></textarea>
-      <div class="flex justify-end">
-        <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
+      <!-- svelte-ignore a11y-click-events-have-key-events -->
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
+      <div class="flex justify-between items-center cursor-pointer select-none" on:click={() => synopsisCollapse = !synopsisCollapse}>
+        <h3 class="card-title text-base">{$t('config.synopsis.title')}</h3>
+        <svg class="w-4 h-4 text-base-content/40 transition-transform" class:rotate-180={synopsisCollapse} viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
       </div>
+      {#if !synopsisCollapse}
+        <textarea class="textarea w-full h-40 text-base" bind:value={localStoryCfg.story_synopsis} placeholder={$t('config.synopsis.placeholder')} disabled={$taskRunning}></textarea>
+        <div class="flex justify-end">
+          <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
+        </div>
+      {/if}
     </div>
   </div>
 

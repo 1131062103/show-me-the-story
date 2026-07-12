@@ -23,12 +23,12 @@ The program ships with no story content of its own — the genre, world, charact
 - **Continue an existing novel**: paste your existing text, the AI extracts settings and chapter summaries, and continues from where you left off
 - **De-AI polish**: built-in polish skills (forbidden AI clichés, colloquial rewriting, etc.); one-click polish per chapter from the writing page
 - **Full-book optimisation**: once finished, run diagnosis → consistency check → roadmap of fixes → automatic per-chapter revision (supports large-context models, per-volume checking, diff preview)
-- **Skill system**: built-in writing / polish skills can be toggled on; custom project-level skills are also supported
+- **Skill system**: root-level writing / polish skills can be toggled on; custom project-level skills are also supported
 - **AI assistant**: a built-in chat assistant can read and modify settings, outlines, and chapters via conversation (with multiple guards on destructive operations)
 - **Streaming output**: generation streams token by token, with a log panel and progress indicator
 - **Resumable**: progress is persisted on every step; close and reopen the program to pick up where you left off
 - **Export**: one-click export to a single TXT; each chapter is also saved as Markdown in the project directory
-- **Multilingual**: each project chooses Chinese or English; AI prompts, generated prose, built-in skills and the agent's system prompt all follow the project language; the UI language can be switched independently
+- **Multilingual**: each project chooses Chinese or English; AI prompts, generated prose, root-level skills and the agent's system prompt all follow the project language; the UI language can be switched independently
 
 ## Quick start
 
@@ -106,7 +106,7 @@ While reviewing a chapter on the Writing page, select a passage in the preview a
 
 ### Skills
 
-On the Skills page you can enable built-in skills:
+On the Skills page you can enable skills installed in the application's root `skills/` directory:
 
 | Skill | Type | Effect |
 |-------|------|--------|
@@ -114,9 +114,9 @@ On the Skills page you can enable built-in skills:
 | Story de-slop audit | Polish | 6-gate AI-fingerprint detection workflow with human-writer baselines |
 | Writing craft | Writing | Chapter opening / closing hooks, payoff density, pacing |
 
-All skills are disabled by default; the writing prompt is not affected unless you turn them on. When a polish-type skill is enabled, the "De-AI polish" button on the writing page becomes useful per chapter, and the full-book optimisation step can attach the polish on top of every revision. Custom skill files in the project directory are also picked up.
+All skills are disabled by default; the writing prompt is not affected unless you turn them on. When a polish-type skill is enabled, the "De-AI polish" button on the writing page becomes useful per chapter, and the full-book optimisation step can attach the polish on top of every revision. The application loads shared skills from `<data-dir>/skills/` and custom project skills from `<data-dir>/storys/<project>/skills/`. When starting the executable with an explicit data-directory argument, place the shared `skills/` folder in that argument directory.
 
-English projects ship with English equivalents (`humanizer-en`, `story-deslop-en`, `writing-craft-en`); the skill list is filtered by project language automatically.
+The root `skills/` folder includes English equivalents (`humanizer-en`, `story-deslop-en`, `writing-craft-en`); the skill list is filtered by project language automatically.
 
 ### Full-book optimisation
 
@@ -308,9 +308,9 @@ task dev:frontend   # start the Vite dev server (:5173, HMR, proxies /api → :4
 
 ### Project layout
 
-The backend is a flat layer of Go files split by responsibility (`outline.go` for outlines, `writing.go` for chapter writing, `foreshadow.go` for foreshadows, `agent.go` for the assistant agent loop, `handlers.go` for HTTP routes, etc.). Frontend pages live under `frontend/src/pages/`.
+The backend uses a layered v2 architecture: the repository root contains only startup and embedded-static delivery; `internal/httpapi/` owns REST/SSE contracts, `internal/app/` owns outline, writing, foreshadow, post-process, and assistant workflows, and `internal/infra/` owns local persistence, OpenAI-compatible transport, skills, and SSE. Frontend pages live under `frontend/src/pages/`.
 
-The full architecture, API endpoint list, SSE event reference, design patterns, and development guidelines are in [AGENTS.md](AGENTS.md).
+The full architecture, development commands, and implementation constraints are in [CLAUDE.md](CLAUDE.md).
 
 ## Star History
 

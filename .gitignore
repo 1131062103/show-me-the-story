@@ -1,6 +1,7 @@
 *.json
 *.exe
 /show-me-the-story
+/showmethestory
 .kilo
 storys/
 frontend/node_modules
