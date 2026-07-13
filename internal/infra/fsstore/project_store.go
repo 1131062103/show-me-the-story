@@ -214,6 +214,9 @@ func (s *Store) LoadProgress(ctx context.Context) (*project.Progress, error) {
 	if err := json.Unmarshal(data, &progress); err != nil {
 		return nil, fmt.Errorf("decode progress: %w", err)
 	}
+	if err := s.loadChapterDocuments(ctx, &progress); err != nil {
+		return nil, err
+	}
 	return &progress, nil
 }
 
@@ -224,7 +227,16 @@ func (s *Store) SaveProgress(ctx context.Context, progress *project.Progress) er
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(progress, "", "  ")
+	if err := s.initializeChapterDocuments(ctx, progress); err != nil {
+		return err
+	}
+	persisted := *progress
+	persisted.Chapters = append([]project.Chapter(nil), progress.Chapters...)
+	for index := range persisted.Chapters {
+		persisted.Chapters[index].Content = ""
+		persisted.Chapters[index].Summary = ""
+	}
+	data, err := json.MarshalIndent(&persisted, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode progress: %w", err)
 	}
@@ -232,6 +244,62 @@ func (s *Store) SaveProgress(ctx context.Context, progress *project.Progress) er
 		return fmt.Errorf("save progress: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) loadChapterDocuments(ctx context.Context, progress *project.Progress) error {
+	for index := range progress.Chapters {
+		chapter := &progress.Chapters[index]
+		if chapter.Num <= 0 {
+			continue
+		}
+		data, err := s.LoadChapterMarkdown(ctx, chapter.Num)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		content, summary, err := parseChapterMarkdown(string(data))
+		if err != nil {
+			continue
+		}
+		chapter.Content, chapter.Summary = content, summary
+	}
+	return nil
+}
+
+func (s *Store) initializeChapterDocuments(ctx context.Context, progress *project.Progress) error {
+	for _, chapter := range progress.Chapters {
+		if strings.TrimSpace(chapter.Content) == "" && strings.TrimSpace(chapter.Summary) == "" {
+			continue
+		}
+		if _, err := s.LoadChapterMarkdown(ctx, chapter.Num); err == nil {
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		if err := s.SaveChapterMarkdown(ctx, chapter.Num, []byte(chapterMarkdown(chapter))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func chapterMarkdown(chapter project.Chapter) string {
+	return fmt.Sprintf("# 第 %d 章: %s\n\n> **本章摘要**：%s\n\n---\n\n%s", chapter.Num, chapter.Title, chapter.Summary, chapter.Content)
+}
+
+func parseChapterMarkdown(markdown string) (content, summary string, err error) {
+	parts := strings.SplitN(markdown, "\n\n---\n\n", 2)
+	if len(parts) != 2 {
+		return "", "", errors.New("missing chapter separator")
+	}
+	const summaryPrefix = "> **本章摘要**："
+	lines := strings.Split(parts[0], "\n")
+	if len(lines) < 3 || !strings.HasPrefix(lines[2], summaryPrefix) {
+		return "", "", errors.New("missing chapter summary")
+	}
+	return parts[1], strings.TrimPrefix(lines[2], summaryPrefix), nil
 }
 
 func (s *Store) LoadChapterMarkdown(ctx context.Context, chapterNum int) ([]byte, error) {

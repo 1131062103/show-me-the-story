@@ -53,6 +53,8 @@
 
   $: ch = $selectedChapter >= 0 && $selectedChapter < chapters.length ? chapters[$selectedChapter] : null;
   $: isCurrent = ch && currentIdx === $selectedChapter;
+	$: rollbackChapterIdx = currentIdx >= chapters.length ? chapters.length - 1 : currentIdx - 1;
+	$: canDeleteRollbackChapter = !!(ch && ch.status === 'accepted' && $selectedChapter === rollbackChapterIdx);
   $: isStreamingThis = $streamingChapterIdx === $selectedChapter && $streamingContent;
   // 流式期间 $streamingContent 只含尾部窗口（性能保护），全文在生成结束后由 progress 拉取
   $: displayContent = isStreamingThis ? $streamingContent : (ch?.content || '');
@@ -225,6 +227,23 @@
         showRevise = false;
         reviseFeedback = '';
         addToast($t('writing.toasts.rejected', { num: chapterNum }), 'success');
+      } catch (e) { addToast(e.message, 'error'); }
+    });
+  }
+
+  function doDeleteRollbackChapter() {
+    if (!ch || !canDeleteRollbackChapter || $taskRunning) return;
+    const chapterNum = ch.num;
+    showConfirm($t('writing.toasts.deleteAsk', { num: chapterNum }), async () => {
+      try {
+        const updated = await api('DELETE', '/api/chapter');
+        progress.set(updated);
+        selectedChapter.set(updated.current_chapter_index);
+        showRevise = false;
+        reviseFeedback = '';
+        editingContent = false;
+        editContent = '';
+        addToast($t('writing.toasts.deleted', { num: chapterNum }), 'success');
       } catch (e) { addToast(e.message, 'error'); }
     });
   }
@@ -607,6 +626,9 @@
                   <button class="btn btn-success btn-sm" on:click={doConfirm} disabled={$taskRunning}>{$t('writing.btn.confirm')}</button>
                   <button class="btn btn-ghost btn-sm text-error" on:click={doReject} disabled={$taskRunning}>{$t('writing.btn.reject')}</button>
                 {/if}
+				{#if canDeleteRollbackChapter}
+				  <button class="btn btn-ghost btn-sm text-error" on:click={doDeleteRollbackChapter} disabled={$taskRunning}>{$t('writing.btn.deleteRollback')}</button>
+				{/if}
                 {#if ch.content && ch.status !== 'writing'}
                   {#if canManualEditContent}
                     <button class="btn btn-ghost btn-sm" on:click={startContentEdit} disabled={$taskRunning || editingContent}>{$t('writing.btn.editContent')}</button>

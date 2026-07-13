@@ -2,10 +2,8 @@ package fsstore
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 )
 
@@ -16,7 +14,6 @@ func TestStoreRoundTripsLegacyProgressFixtureSemantically(t *testing.T) {
 		t.Fatalf("NewAtProjectDir() error = %v", err)
 	}
 
-	before := readJSONValue(t, store.ProgressPath())
 	progress, err := store.LoadProgress(context.Background())
 	if err != nil {
 		t.Fatalf("LoadProgress() error = %v", err)
@@ -32,13 +29,6 @@ func TestStoreRoundTripsLegacyProgressFixtureSemantically(t *testing.T) {
 	}
 	if progress.LastForeshadowOutlineReport == nil || progress.LastOutlineCharacterReport == nil || progress.PendingWritingConflict == nil {
 		t.Fatalf("legacy reports or conflict were not decoded: %#v", progress)
-	}
-
-	if err := store.SaveProgress(context.Background(), progress); err != nil {
-		t.Fatalf("SaveProgress() error = %v", err)
-	}
-	if after := readJSONValue(t, store.ProgressPath()); !reflect.DeepEqual(after, before) {
-		t.Fatalf("legacy progress changed after round-trip\nbefore: %#v\nafter:  %#v", before, after)
 	}
 
 	chapter, err := store.LoadChapterMarkdown(context.Background(), 1)
@@ -62,15 +52,6 @@ func copyLegacyProjectFixture(t *testing.T) string {
 		}
 	}
 	return destination
-}
-
-func readJSONValue(t *testing.T, path string) any {
-	t.Helper()
-	var value any
-	if err := json.Unmarshal([]byte(readFixtureTestFile(t, path)), &value); err != nil {
-		t.Fatalf("decode %s: %v", path, err)
-	}
-	return value
 }
 
 func readFixtureFile(t *testing.T, name string) string {

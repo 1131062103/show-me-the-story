@@ -91,6 +91,13 @@ body {
   scrollbar-gutter: stable;
 }
 
+/* Outline page: keep the chapter list independently scrollable. */
+.outline-chapter-list {
+  max-height: clamp(280px, 54vh, 680px);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 .chapter-scroll-top-btn {
   position: absolute;
   top: 0.5rem;
@@ -107,6 +114,10 @@ body {
 @media (max-width: 768px) {
   .chapter-reading-window {
     height: clamp(260px, 55vh, 460px);
+  }
+
+  .outline-chapter-list {
+    max-height: 52vh;
   }
 }
 

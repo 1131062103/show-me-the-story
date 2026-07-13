@@ -258,10 +258,17 @@ func (s *Server) deleteProgress(w http.ResponseWriter, r *http.Request) {
 	if s.rejectTask(w) {
 		return
 	}
+	var deleted []int
 	if !s.updateProgress(w, r, func(progress *project.Progress) error {
+		for _, chapter := range progress.Chapters {
+			deleted = append(deleted, chapter.Num)
+		}
 		*progress = project.Progress{Phase: "outline"}
 		return nil
 	}) {
+		return
+	}
+	if !s.deleteChapterMarkdowns(w, r, deleted) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.session.Snapshot().Project.Progress)
@@ -271,11 +278,13 @@ func (s *Server) deleteOutline(w http.ResponseWriter, r *http.Request) {
 	if s.rejectTask(w) {
 		return
 	}
+	var deleted []int
 	err := s.session.WithProgress(r.Context(), func(progress *project.Progress) error {
 		for _, chapter := range progress.Chapters {
 			if chapter.Status == project.StatusWriting || chapter.Status == project.StatusReview {
 				return errOutlineDeleteWithDraft
 			}
+			deleted = append(deleted, chapter.Num)
 		}
 		progress.Title = ""
 		progress.CorePrompt = ""
@@ -295,6 +304,9 @@ func (s *Server) deleteOutline(w http.ResponseWriter, r *http.Request) {
 		} else {
 			writeError(w, http.StatusInternalServerError, "save_progress_failed")
 		}
+		return
+	}
+	if !s.deleteChapterMarkdowns(w, r, deleted) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.session.Snapshot().Project.Progress)
@@ -746,6 +758,21 @@ func (s *Server) withProgressForDelete(r *http.Request, update func(*project.Pro
 		return runtime.ErrNoProject
 	}
 	return s.session.WithProgress(r.Context(), update)
+}
+
+func (s *Server) deleteChapterMarkdowns(w http.ResponseWriter, r *http.Request, chapters []int) bool {
+	snapshot := s.session.Snapshot()
+	if snapshot == nil {
+		writeError(w, http.StatusBadRequest, "select_project_first")
+		return false
+	}
+	for _, chapterNum := range chapters {
+		if err := snapshot.Store.DeleteChapterMarkdown(r.Context(), chapterNum); err != nil {
+			writeError(w, http.StatusInternalServerError, "save_progress_failed")
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) writeChapterDeleteError(w http.ResponseWriter, err error) {

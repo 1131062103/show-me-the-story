@@ -119,6 +119,15 @@ func cloneProject(value *project.Project) *project.Project {
 	if err := json.Unmarshal(data, &clone); err != nil {
 		panic(err)
 	}
+	if value.Progress != nil && clone.Progress != nil {
+		for index := range clone.Progress.Chapters {
+			if index >= len(value.Progress.Chapters) {
+				break
+			}
+			clone.Progress.Chapters[index].Content = value.Progress.Chapters[index].Content
+			clone.Progress.Chapters[index].Summary = value.Progress.Chapters[index].Summary
+		}
+	}
 	clone.Name = value.Name
 	return &clone
 }

@@ -8,15 +8,17 @@ const (
 	StatusAccepted = "accepted"
 )
 
-// Chapter is the persisted state and prose of one chapter.
+// Chapter holds the persisted workflow state and the chapter text loaded from
+// its Markdown document. Content and Summary are intentionally not serialized
+// into progress.json; Chapter_XX.md is their single on-disk source of truth.
 type Chapter struct {
 	Num            int    `json:"num"`
 	Title          string `json:"title"`
 	Outline        string `json:"outline"`
 	OutlineLocked  bool   `json:"outline_locked,omitempty"`
 	ParagraphLocks []int  `json:"paragraph_locks,omitempty"`
-	Content        string `json:"content"`
-	Summary        string `json:"summary"`
+	Content        string `json:"content,omitempty"`
+	Summary        string `json:"summary,omitempty"`
 	Status         string `json:"status"`
 }
 

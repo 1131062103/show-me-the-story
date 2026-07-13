@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"showmethestory/internal/domain/project"
@@ -62,6 +63,10 @@ func TestStorePersistsCompatibleProgressAtomically(t *testing.T) {
 			ID: 1, Name: "clue", PlantChapter: 1, TargetChapter: 2, Status: project.ForeshadowPlanted,
 		}},
 	}
+	chapterMarkdown := "# 第 2 章: Chapter\n\n> **本章摘要**：summary\n\n---\n\nprose"
+	if err := store.SaveChapterMarkdown(context.Background(), 2, []byte(chapterMarkdown)); err != nil {
+		t.Fatalf("SaveChapterMarkdown() error = %v", err)
+	}
 	if err := store.SaveProgress(context.Background(), want); err != nil {
 		t.Fatalf("SaveProgress() error = %v", err)
 	}
@@ -73,13 +78,24 @@ func TestStorePersistsCompatibleProgressAtomically(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("loaded progress = %#v, want %#v", got, want)
 	}
+	data, err := os.ReadFile(store.ProgressPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) == "" || strings.Contains(string(data), `"content"`) || strings.Contains(string(data), `"summary"`) {
+		t.Fatalf("progress.json contains chapter text: %s", data)
+	}
+	markdown, err := store.LoadChapterMarkdown(context.Background(), 2)
+	if err != nil || string(markdown) != chapterMarkdown {
+		t.Fatalf("chapter markdown = %q, %v; SaveProgress must not overwrite chapter documents", markdown, err)
+	}
 
 	entries, err := os.ReadDir(store.ProjectDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if entry.Name() != "progress.json" {
+		if entry.Name() != "progress.json" && entry.Name() != "Chapter_02.md" {
 			t.Errorf("unexpected file left in project directory: %s", entry.Name())
 		}
 	}

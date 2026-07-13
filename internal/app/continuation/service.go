@@ -163,6 +163,15 @@ func (s *Service) Confirm(ctx context.Context, analysis Analysis) error {
 	}); err != nil {
 		return err
 	}
+	snapshot := s.session.Snapshot()
+	if snapshot == nil || snapshot.Project == nil || snapshot.Project.Progress == nil {
+		return runtime.ErrNoProject
+	}
+	for _, chapter := range snapshot.Project.Progress.Chapters {
+		if err := snapshot.Store.SaveChapterMarkdown(ctx, chapter.Num, []byte(markdown(chapter))); err != nil {
+			return fmt.Errorf("export chapter %d markdown: %w", chapter.Num, err)
+		}
+	}
 	s.mu.Lock()
 	if s.pendingAnalysis != pending {
 		s.mu.Unlock()
@@ -177,6 +186,10 @@ func (s *Service) Confirm(ctx context.Context, analysis Analysis) error {
 		}
 	}
 	return nil
+}
+
+func markdown(chapter project.Chapter) string {
+	return fmt.Sprintf("# 第 %d 章: %s\n\n> **本章摘要**：%s\n\n---\n\n%s", chapter.Num, chapter.Title, chapter.Summary, chapter.Content)
 }
 
 var chapterBoundary = regexp.MustCompile(`(?m)^[\s]*(第[一二三四五六七八九十百千\d]+章|Chapter\s+\d+|#\s+Chapter\s+\d+|第\d+章)`)
