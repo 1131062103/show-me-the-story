@@ -15,6 +15,7 @@ export default {
   'app.uiLang.label': '界面语言',
   'app.uiLang.zh': '中',
   'app.uiLang.en': 'EN',
+  'app.chat.toggle': '助理',
 
   // Navigation
   'nav.config': '配置',

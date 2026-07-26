@@ -275,9 +275,9 @@
 
 {#if diffItem}
   <dialog class="modal modal-open">
-    <div class="modal-box max-w-4xl">
+    <div class="modal-box max-w-4xl w-[calc(100vw-1rem)] sm:w-full">
       <h3 class="font-bold text-base mb-2">{$t('pp.diff.title', { n: diffItem.chapter_num })}</h3>
-      <div class="grid grid-cols-2 gap-3 text-sm">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
         <div>
           <div class="text-xs text-base-content/50 mb-1">{$t('pp.diff.before')}</div>
           <div class="bg-base-300 rounded p-3 whitespace-pre-wrap max-h-64 overflow-y-auto font-serif">{diffItem.diff_original || '—'}</div>

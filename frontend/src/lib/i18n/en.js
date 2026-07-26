@@ -14,6 +14,7 @@ export default {
   'app.uiLang.label': 'UI language',
   'app.uiLang.zh': 'ZH',
   'app.uiLang.en': 'EN',
+  'app.chat.toggle': 'Assistant',
 
   // Navigation
   'nav.config': 'Config',

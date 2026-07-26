@@ -377,12 +377,12 @@
 
 <div class="space-y-3">
   <ConfigChangePanel />
-  <!-- API + Story Config: side by side -->
-  <div class="grid grid-cols-2 gap-3">
+  <!-- API + Story Config: side by side on md+ -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
     <div class="card bg-base-200 shadow-sm">
       <div class="card-body p-4 gap-2">
         <h3 class="card-title text-base">{$t('config.api.title')}</h3>
-        <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
           <div class="col-span-2">
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.baseUrl')}</span>
             <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.openai.com/v1" disabled={$taskRunning || testingApi} />
@@ -448,7 +448,7 @@
             <span>{$t('config.story.acceptedHint')}</span>
           </div>
         {/if}
-        <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
           <div>
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.type')}</span>
             <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.type} placeholder={$t('config.story.type.placeholder')} disabled={$taskRunning} />
@@ -512,7 +512,7 @@
         <svg class="w-4 h-4 text-base-content/40 transition-transform" class:rotate-180={charCollapse} viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
       </div>
       {#if !charCollapse}
-        <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+        <div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
           {#if chars.length === 0}
             <p class="text-xs text-base-content/40 col-span-full py-2">{$t('config.char.empty')}</p>
           {:else}
@@ -534,7 +534,7 @@
 
         {#if showCharForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.char.name')}</span>
                 <input type="text" class="input input-sm w-full" bind:value={charName} disabled={$taskRunning} />
@@ -544,7 +544,7 @@
                 <input type="text" class="input input-sm w-full" bind:value={charAge} disabled={$taskRunning} />
               </div>
             </div>
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.char.appearance')}</span>
                 <textarea class="textarea textarea-sm w-full h-14 text-sm" bind:value={charAppearance} disabled={$taskRunning}></textarea>
@@ -605,7 +605,7 @@
           {/each}
         </div>
 
-        <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+        <div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
           {#if filteredWvs.length === 0}
             <p class="text-xs text-base-content/40 col-span-full py-2">{$t('config.wv.empty')}</p>
           {:else}
@@ -627,7 +627,7 @@
 
         {#if showWvForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.wv.name')}</span>
                 <input type="text" class="input input-sm w-full" bind:value={wvName} disabled={$taskRunning} />
@@ -678,7 +678,7 @@
         <svg class="w-4 h-4 text-base-content/40 transition-transform" class:rotate-180={orgCollapse} viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
       </div>
       {#if !orgCollapse}
-        <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+        <div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
           {#if orgs.length === 0}
             <p class="text-xs text-base-content/40 col-span-full py-2">{$t('config.org.empty')}</p>
           {:else}
@@ -703,7 +703,7 @@
 
         {#if showOrgForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.org.name')}</span>
                 <input type="text" class="input input-sm w-full" bind:value={orgName} disabled={$taskRunning} />
@@ -754,7 +754,7 @@
         <svg class="w-4 h-4 text-base-content/40 transition-transform" class:rotate-180={relCollapse} viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
       </div>
       {#if !relCollapse}
-        <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
+        <div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
           {#if rels.length === 0}
             <p class="text-xs text-base-content/40 col-span-full py-2">{$t('config.rel.empty')}</p>
           {:else}
@@ -777,7 +777,7 @@
 
         {#if showRelForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-end">
+            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-2 items-end">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.rel.source')}</span>
                 <select class="select select-sm w-full" bind:value={relSource} disabled={$taskRunning}>

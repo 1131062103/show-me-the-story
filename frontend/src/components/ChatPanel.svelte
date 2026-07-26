@@ -238,26 +238,26 @@
   ];
 </script>
 
-<div class="flex flex-col h-full">
+<div class="flex flex-col h-full min-h-0">
   <!-- 会话栏 -->
-  <div class="border-b border-base-content/10 px-3 py-2 flex items-center gap-2 shrink-0">
+  <div class="border-b border-base-content/10 px-2 sm:px-3 py-2 flex items-center gap-1.5 sm:gap-2 shrink-0">
     <button
-      class="btn btn-sm gap-1 border border-base-content/20 hover:border-primary/50 hover:bg-base-300 transition-colors"
+      class="btn btn-sm gap-1 border border-base-content/20 hover:border-primary/50 hover:bg-base-300 transition-colors shrink-0"
       class:border-primary={showSessionList}
       class:bg-base-300={showSessionList}
       on:click={() => showSessionList = !showSessionList}
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
-      {$t('chat.session.menu')}
+      <span class="hidden sm:inline">{$t('chat.session.menu')}</span>
       <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 transition-transform" class:rotate-180={showSessionList} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
     </button>
-    <span class="text-sm text-base-content/50 truncate flex-1">
+    <span class="text-sm text-base-content/50 truncate flex-1 min-w-0">
       {$currentChatSession?.title || $t('chat.session.placeholder')}
     </span>
     {#if $taskRunning}
-      <button class="btn btn-error btn-xs gap-1" on:click={stopTask}>{$t('chat.session.stop')}</button>
+      <button class="btn btn-error btn-xs gap-1 shrink-0" on:click={stopTask}>{$t('chat.session.stop')}</button>
     {/if}
-    <button class="btn btn-primary btn-xs" on:click={createSession} disabled={$taskRunning}>{$t('chat.session.new')}</button>
+    <button class="btn btn-primary btn-xs shrink-0" on:click={createSession} disabled={$taskRunning}>{$t('chat.session.new')}</button>
   </div>
 
   {#if showSessionList}

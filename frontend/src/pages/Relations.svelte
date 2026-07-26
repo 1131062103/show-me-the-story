@@ -251,9 +251,9 @@
   }
 </script>
 
-<div bind:this={container} class="relative w-full bg-base-200 border border-base-content/10 rounded-lg overflow-hidden" style="height:calc(100vh - 180px)">
+<div bind:this={container} class="relative w-full bg-base-200 border border-base-content/10 rounded-lg overflow-hidden" style="height:calc(100dvh - 140px); min-height:280px">
   <canvas bind:this={canvas}></canvas>
-  <div class="absolute bottom-3 right-3 bg-base-300 border border-base-content/10 rounded-lg p-2 text-xs flex gap-4">
+  <div class="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 bg-base-300 border border-base-content/10 rounded-lg p-2 text-xs flex flex-wrap gap-2 sm:gap-4 max-w-[90%]">
     <span><span class="inline-block w-2.5 h-2.5 rounded-full bg-[#5b8af5] mr-1 align-middle"></span>{$t('relations.legend.character')}</span>
     <span><span class="inline-block w-2.5 h-2.5 rounded-full bg-[#4caf50] mr-1 align-middle"></span>{$t('relations.legend.worldview')}</span>
     <span><span class="inline-block w-2.5 h-2.5 rounded-full bg-[#ff9800] mr-1 align-middle"></span>{$t('relations.legend.organization')}</span>

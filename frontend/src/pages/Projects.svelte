@@ -93,7 +93,7 @@
 </script>
 
 <div class="flex items-center justify-center min-h-[60vh]">
-  <div class="w-full max-w-xl space-y-6">
+  <div class="w-full max-w-xl mx-auto space-y-6">
     <!-- Title -->
     <div class="text-center">
       <div class="text-5xl mb-4">📚</div>

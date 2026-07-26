@@ -496,17 +496,17 @@
 
     <PostProcessPanel />
 
-    <!-- 章节区 -->
-    <div class="grid grid-cols-[230px_1fr] gap-3" style="min-height:400px">
+    <!-- 章节区：手机上下堆叠，桌面左右分栏 -->
+    <div class="grid grid-cols-1 md:grid-cols-[230px_1fr] gap-3" style="min-height:400px">
       <!-- 章节列表 -->
-      <div class="card bg-base-200 shadow-sm overflow-y-auto max-h-[calc(100vh-280px)]">
-        <ul class="menu menu-sm p-0 w-full">
+      <div class="card bg-base-200 shadow-sm overflow-y-auto max-h-40 md:max-h-[calc(100vh-280px)]">
+        <ul class="menu menu-sm p-0 w-full menu-horizontal md:menu-vertical flex-nowrap md:flex-wrap overflow-x-auto md:overflow-x-visible">
           {#each chapters as c, i}
-            <li>
+            <li class="shrink-0 md:shrink md:w-full">
               <button class="flex gap-2 items-center {$selectedChapter === i ? 'active' : ''}" on:click={() => selectChapter(i)}>
                 <span class="w-2 h-2 rounded-full shrink-0 {statusMeta[c.status]?.dot || ''}"></span>
                 <span class="text-base-content/50 w-6 shrink-0 text-right">{c.num}</span>
-                <span class="flex-1 text-left truncate text-sm">{c.title}</span>
+                <span class="flex-1 text-left truncate text-sm max-w-[8rem] md:max-w-none">{c.title}</span>
                 {#if i === currentIdx && c.status !== 'accepted'}
                   <span class="badge badge-primary badge-xs shrink-0">{$t('writing.tag.current')}</span>
                 {/if}

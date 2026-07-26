@@ -445,7 +445,7 @@
 <!-- 编辑/创建弹窗 -->
 {#if showForm}
   <div class="modal modal-open">
-    <div class="modal-box max-w-lg">
+    <div class="modal-box max-w-lg w-[calc(100vw-1rem)] sm:w-full">
       <h3 class="font-bold text-lg">{editing ? $t('fs.form.edit') : $t('fs.form.create')}</h3>
       <div class="form-control gap-3 mt-4">
         <span class="label py-0"><span class="label-text">{$t('fs.form.name')}</span></span>
