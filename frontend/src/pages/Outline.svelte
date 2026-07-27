@@ -7,8 +7,9 @@
 
   const OUTLINE_FOCUS_KEY = 'showmethestory.outlineFocusChapter';
 
+  // Once writing begins, the chapter outline is permanently preview-only.
   function isOutlineEditable(status) {
-    return status === 'pending' || status === 'writing' || status === 'review';
+    return status === 'pending';
   }
 
   $: p = $progress;
@@ -20,6 +21,8 @@
   $: hasAccepted = chapters.some(c => c.status === 'accepted');
   $: inOutlinePhase = p?.phase === 'outline';
   $: pendingCount = chapters.filter(c => c.status === 'pending').length;
+  $: editingChapter = chapters.find(ch => ch.num === editingNum);
+  $: canEditOutline = !!editingChapter && isOutlineEditable(editingChapter.status) && !$taskRunning;
 
   $: statusMeta = {
     pending:  { label: $t('outline.status.pending'),  cls: 'badge-ghost' },
@@ -35,6 +38,8 @@
   let editingNum = -1;
   let editTitle = '';
   let editOutline = '';
+  let showOutlineEditor = false;
+  let outlineEditorDialog;
 
   // 导入续写（v3 流水线）
   let showImport = false;
@@ -52,6 +57,12 @@
     focusChapterFromSession();
   }
 
+  // Native dialog enters the browser's top layer, avoiding clipping by the page scroll container.
+  $: if (outlineEditorDialog) {
+    if (showOutlineEditor && !outlineEditorDialog.open) outlineEditorDialog.showModal();
+    if (!showOutlineEditor && outlineEditorDialog.open) outlineEditorDialog.close();
+  }
+
   async function focusChapterFromSession() {
     let raw;
     try { raw = sessionStorage.getItem(OUTLINE_FOCUS_KEY); } catch { return; }
@@ -60,7 +71,7 @@
     const num = parseInt(raw, 10);
     if (!num) return;
     const ch = chapters.find(c => c.num === num);
-    if (!ch || !isOutlineEditable(ch.status) || $taskRunning) return;
+    if (!ch) return;
     startEdit(ch);
     await tick();
     const el = document.querySelector(`[data-outline-chapter="${num}"]`);
@@ -167,19 +178,23 @@
     editingNum = ch.num;
     editTitle = ch.title;
     editOutline = ch.outline;
+    showOutlineEditor = true;
   }
 
   function cancelEdit() {
     editingNum = -1;
+    showOutlineEditor = false;
   }
 
   async function saveEdit() {
+    if (!canEditOutline) { addToast($t('outline.toasts.editLocked'), 'error'); return; }
     if (!editTitle.trim() || !editOutline.trim()) { addToast($t('outline.toasts.editRequired'), 'error'); return; }
     try {
       await api('PUT', '/api/outline/' + editingNum, { title: editTitle.trim(), outline: editOutline.trim() });
       progress.set(await api('GET', '/api/progress'));
       addToast($t('outline.toasts.editSaved', { num: editingNum }), 'success');
       editingNum = -1;
+      showOutlineEditor = false;
     } catch (e) { addToast(e.message, 'error'); }
   }
 
@@ -428,37 +443,24 @@
         </div>
         <div class="space-y-1.5">
           {#each chapters as ch (ch.num)}
-            {#if editingNum === ch.num}
-              <div data-outline-chapter={ch.num} class="bg-base-300 rounded-lg p-3 space-y-2 ring-1 ring-primary/50">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-bold text-base-content/50 shrink-0">{$t('outline.chapter.chapterLabel', { num: ch.num })}</span>
-                  <input type="text" class="input input-sm flex-1" bind:value={editTitle} placeholder={$t('outline.chapter.titlePlaceholder')} disabled={$taskRunning} />
-                </div>
-                <textarea class="textarea textarea-sm w-full h-24 text-sm" bind:value={editOutline} placeholder={$t('outline.chapter.outlinePlaceholder')} disabled={$taskRunning}></textarea>
-                <div class="flex justify-end gap-2">
-                  <button class="btn btn-ghost btn-xs" on:click={cancelEdit}>{$t('common.cancel')}</button>
-                  <button class="btn btn-success btn-xs" on:click={saveEdit} disabled={$taskRunning}>{$t('common.save')}</button>
-                </div>
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+              data-outline-chapter={ch.num}
+              class="bg-base-300 rounded-lg p-2.5 group cursor-pointer hover:ring-1 hover:ring-primary/40 transition-shadow"
+              on:click={() => startEdit(ch)}
+            >
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-bold text-base-content/40 w-12 shrink-0">{ch.num}</span>
+                <span class="text-sm font-medium flex-1 min-w-0 truncate">{ch.title}</span>
+                <span class="badge badge-xs {statusMeta[ch.status]?.cls || 'badge-ghost'}">{statusMeta[ch.status]?.label || ch.status}</span>
+                {#if isOutlineEditable(ch.status)}
+                  <span class="text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0">{$t('outline.chapter.editTag')}</span>
+                {:else}
+                  <span class="text-xs text-base-content/45 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">{$t('outline.chapter.previewTag')}</span>
+                {/if}
               </div>
-            {:else}
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
-                data-outline-chapter={ch.num}
-                class="bg-base-300 rounded-lg p-2.5 group {isOutlineEditable(ch.status) && !$taskRunning ? 'cursor-pointer hover:ring-1 hover:ring-primary/40' : ''} transition-shadow"
-                on:click={() => isOutlineEditable(ch.status) && !$taskRunning && startEdit(ch)}
-              >
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-bold text-base-content/40 w-12 shrink-0">{ch.num}</span>
-                  <span class="text-sm font-medium flex-1 min-w-0 truncate">{ch.title}</span>
-                  <span class="badge badge-xs {statusMeta[ch.status]?.cls || 'badge-ghost'}">{statusMeta[ch.status]?.label || ch.status}</span>
-                  {#if isOutlineEditable(ch.status)}
-                    <span class="text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0">{$t('outline.chapter.editTag')}</span>
-                  {/if}
-                </div>
-                <p class="text-xs text-base-content/50 mt-1 ml-14 line-clamp-2">{ch.outline}</p>
-              </div>
-            {/if}
+            </div>
           {/each}
         </div>
 
@@ -472,5 +474,40 @@
         {/if}
       </div>
     </div>
+
+    <dialog
+      bind:this={outlineEditorDialog}
+      class="outline-editor-dialog m-auto w-[calc(100vw-1.5rem)] max-w-3xl rounded-xl border border-base-content/20 bg-base-100 p-0 text-base-content shadow-2xl backdrop:bg-black/60 sm:w-[calc(100vw-2rem)]"
+      on:cancel|preventDefault={cancelEdit}
+      on:close={() => { showOutlineEditor = false; editingNum = -1; }}
+      aria-label={$t('outline.chapter.chapterLabel', { num: editingNum })}
+    >
+      <div class="flex h-[min(82dvh,42rem)] max-h-[calc(100dvh-1.5rem)] flex-col">
+        <div class="flex items-center gap-3 border-b border-base-300 px-4 py-3 sm:px-5 sm:py-4 shrink-0">
+          <span class="text-sm font-bold text-base-content/50 shrink-0">{$t('outline.chapter.chapterLabel', { num: editingNum })}</span>
+          {#if canEditOutline}
+            <input type="text" class="input input-sm flex-1 min-w-0" bind:value={editTitle} placeholder={$t('outline.chapter.titlePlaceholder')} />
+          {:else}
+            <span class="font-medium flex-1 min-w-0 truncate">{editingChapter?.title}</span>
+            <span class="badge badge-xs {statusMeta[editingChapter?.status]?.cls || 'badge-ghost'}">{statusMeta[editingChapter?.status]?.label || editingChapter?.status}</span>
+          {/if}
+          <button class="btn btn-ghost btn-xs btn-circle shrink-0" on:click={cancelEdit} aria-label={$t('common.close')}>✕</button>
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
+          {#if canEditOutline}
+            <textarea class="textarea textarea-sm h-full min-h-56 w-full resize-none text-sm leading-6" bind:value={editOutline} placeholder={$t('outline.chapter.outlinePlaceholder')}></textarea>
+          {:else}
+            <div class="h-full min-h-56 whitespace-pre-wrap rounded-lg bg-base-200 p-3 text-sm leading-6">{editingChapter?.outline}</div>
+            <p class="mt-2 text-xs text-base-content/50">{$t('outline.chapter.readonlyHint')}</p>
+          {/if}
+        </div>
+        <div class="flex justify-end gap-2 border-t border-base-300 px-4 py-3 sm:px-5 sm:py-4 shrink-0">
+          <button class="btn btn-ghost btn-sm" on:click={cancelEdit}>{canEditOutline ? $t('common.cancel') : $t('common.close')}</button>
+          {#if canEditOutline}
+            <button class="btn btn-success btn-sm" on:click={saveEdit}>{$t('common.save')}</button>
+          {/if}
+        </div>
+      </div>
+    </dialog>
   {/if}
 </div>

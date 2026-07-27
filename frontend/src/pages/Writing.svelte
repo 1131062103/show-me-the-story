@@ -90,29 +90,34 @@
   let blockFeedback = '';
   let insertAfterId = null;    // 正在其后插入新 block 的 id（0 = 开头）
   let insertText = '';
+  let mobileBlockActionsId = null; // 触屏设备当前展开操作栏的段落
 
   function startBlockEdit(b) {
     editingBlockId = b.id;
     editingText = b.text;
     revisingBlockId = null;
     insertAfterId = null;
+    mobileBlockActionsId = null;
   }
   function startBlockRevise(b) {
     revisingBlockId = b.id;
     blockFeedback = '';
     editingBlockId = null;
     insertAfterId = null;
+    mobileBlockActionsId = null;
   }
   function startBlockInsert(afterId) {
     insertAfterId = afterId;
     insertText = '';
     editingBlockId = null;
     revisingBlockId = null;
+    mobileBlockActionsId = null;
   }
   function cancelBlockOps() {
     editingBlockId = null;
     revisingBlockId = null;
     insertAfterId = null;
+    mobileBlockActionsId = null;
   }
 
   async function saveBlockEdit() {
@@ -562,7 +567,11 @@
                   {:else if chapterBlocks.length > 0}
                     <div class="space-y-3">
                       {#each chapterBlocks as b (b.id)}
-                        <div class="group relative rounded hover:bg-base-100/40 -mx-2 px-2 py-0.5">
+                        <!-- 手机端点按段落展开/收起操作栏；桌面端仍使用悬停操作栏。 -->
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <div class="group relative rounded hover:bg-base-100/40 -mx-2 px-2 py-0.5 cursor-pointer md:cursor-auto"
+                             on:click={() => mobileBlockActionsId = mobileBlockActionsId === b.id ? null : b.id}>
                           {#if editingBlockId === b.id}
                             <textarea class="textarea textarea-sm w-full text-[15px] leading-relaxed" rows={Math.max(3, Math.ceil(b.text.length / 40))} bind:value={editingText} disabled={$taskRunning}></textarea>
                             <div class="flex gap-2 justify-end mt-1">
@@ -571,12 +580,21 @@
                             </div>
                           {:else}
                             <div class="whitespace-pre-wrap {b.type === 'scene_break' ? 'text-center text-base-content/40' : ''}">{b.text}</div>
-                            <div class="absolute right-1 top-0.5 hidden group-hover:flex gap-1 bg-base-200/90 rounded shadow px-1 py-0.5">
+                            <!-- 桌面端保持悬停快捷操作；触屏端改为点按“更多”后展开。 -->
+                            <div class="absolute right-1 top-0.5 hidden md:group-hover:flex gap-1 bg-base-200/90 rounded shadow px-1 py-0.5">
                               <button class="btn btn-ghost btn-xs px-1.5" title={$t('writing.block.edit')} disabled={$taskRunning} on:click={() => startBlockEdit(b)}>✏️</button>
                               <button class="btn btn-ghost btn-xs px-1.5" title={$t('writing.block.revise')} disabled={$taskRunning} on:click={() => startBlockRevise(b)}>🤖</button>
                               <button class="btn btn-ghost btn-xs px-1.5" title={$t('writing.block.insertAfter')} disabled={$taskRunning} on:click={() => startBlockInsert(b.id)}>➕</button>
                               <button class="btn btn-ghost btn-xs px-1.5 text-error" title={$t('writing.block.delete')} disabled={$taskRunning} on:click={() => deleteBlock(b)}>🗑</button>
                             </div>
+                            {#if mobileBlockActionsId === b.id}
+                              <div class="mt-2 flex flex-wrap gap-2 rounded-lg bg-base-100 p-2 md:hidden">
+                                <button class="btn btn-ghost btn-sm" disabled={$taskRunning} on:click|stopPropagation={() => startBlockEdit(b)}>✏️ {$t('writing.block.edit')}</button>
+                                <button class="btn btn-ghost btn-sm" disabled={$taskRunning} on:click|stopPropagation={() => startBlockRevise(b)}>🤖 {$t('writing.block.revise')}</button>
+                                <button class="btn btn-ghost btn-sm" disabled={$taskRunning} on:click|stopPropagation={() => startBlockInsert(b.id)}>➕ {$t('writing.block.insertAfter')}</button>
+                                <button class="btn btn-ghost btn-sm text-error" disabled={$taskRunning} on:click|stopPropagation={() => deleteBlock(b)}>🗑 {$t('writing.block.delete')}</button>
+                              </div>
+                            {/if}
                           {/if}
                           {#if revisingBlockId === b.id}
                             <div class="bg-base-100 rounded p-2 mt-1 space-y-1">

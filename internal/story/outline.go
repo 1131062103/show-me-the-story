@@ -312,12 +312,8 @@ func ConfirmOutlineAction(state *Progress, progressPath string) error {
 }
 
 func outlineEditable(status string) bool {
-	switch status {
-	case StatusPending, StatusWriting, StatusReview:
-		return true
-	default:
-		return false
-	}
+	// A chapter outline becomes immutable as soon as writing starts.
+	return status == StatusPending
 }
 
 func EditChapterOutline(state *Progress, chapterNum int, title, outline string) error {
@@ -332,7 +328,7 @@ func EditChapterOutline(state *Progress, chapterNum int, title, outline string) 
 		return fmt.Errorf("章节 %d 不存在", chapterNum)
 	}
 	if !outlineEditable(state.Chapters[idx].Status) {
-		return fmt.Errorf("只能编辑待定/写作中/审核中章节的大纲（已确认章节不可改）")
+		return fmt.Errorf("章节已开始写作，大纲仅可预览，不能编辑")
 	}
 	state.Chapters[idx].Title = title
 	state.Chapters[idx].Outline = outline
