@@ -82,16 +82,16 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 | `internal/llm/jsonextract.go` | `ExtractJSON`/`WalkJSONStructure`：从自由格式模型输出中定位首个完整 JSON 对象（字符串感知的花括号匹配），story 事实核查与 agent 工具解析共用 |
 | `internal/llm/tokens.go` | `TaskTokenUsage` 任务级 token 累计器（context 挂载）、`WithTaskTokens`/`TaskTokensFromContext`、`EstimateTokensFromRunes`（rune×1.5 估算）、throttled SSE 推送 |
 | `internal/llm/api_url_test.go` | `resolveChatCompletionsURL` 表驱动测试（z.ai v4、strict、DeepSeek、完整 URL） |
-| `internal/story/state.go` | `Progress`（含 `Arcs []Arc` 卷结构）、`Arc`（卷：ID/Title/Goal/StartCh/EndCh/Summary）、`ChapterState`（含 `WordCount` 字数、`ContentRev` 内容修订号）、`Foreshadow`、`MemoryEntry`（含 API 响应专用 `Snippet`）结构体，`LoadProgress`、`SaveProgress`（v3 分文件存储，见 `storage.go`）、`ChapterMarkdownPath`、`SaveChapterMarkdown(projectDir, ...)`、`ForeshadowRoadmapPath`（项目目录 `Foreshadows.md`） |
+| `internal/story/state.go` | `Progress`（含 `Arcs []Arc` 卷结构）、`Arc`（卷：ID/Title/Goal/StartCh/EndCh/Summary）、`ChapterState`（含 `WordCount` 字数、`ContentRev` 内容修订号、`Finalized` 后处理完成标记——分阶段写作下，章节确认补齐摘要/记忆后才为 true；false 表示正文已生成但摘要/记忆仍未生成，便于删除/驳回时判断）、`Foreshadow`、`MemoryEntry`（含 API 响应专用 `Snippet`）结构体，`LoadProgress`、`SaveProgress`（v3 分文件存储，见 `storage.go`）、`ChapterMarkdownPath`、`SaveChapterMarkdown(projectDir, ...)`、`ForeshadowRoadmapPath`（项目目录 `Foreshadows.md`） |
 | `internal/story/storage.go` | **v3 存储层**：章节正文按章存 `chapters/NNNNNN.json`，`progress.json` 只存元数据（不含正文）；`saveChapterFiles`（fnv 内容哈希 `HashContent` 脏检查，仅重写变更章节 + 清理孤儿文件）、`loadChapterContents`、`ResetProgressFiles`（重置进度含章节目录）、`ProgressView`（API 响应视图：剥离正文、附 `word_count`/`content_rev`、解析记忆 `snippet`） |
 | `internal/story/blocks.go` | **v3 Block 模型**：`Block{ID,Type,Text}`（type: paragraph/dialogue/scene_break 仅展示提示）；`SyncChapterBlocks`（从 Content 派生 blocks，未变段落 ID 稳定，`\n\n` 分段、无空行退化 `\n`，sep 存 `BlockSep`）、`rebuildContentFromBlocks`、`UpdateBlock`/`DeleteBlock`/`InsertBlockAfter`（块编辑后重建 Content）、`ReviseBlockAction`（复用 `ChapterSegmentRevision` prompt 对单 block AI 修订）。内存中 Content 仍是唯一事实源，AI 流程不感知 blocks |
 | `internal/story/arcs.go` | **v3 层级大纲（卷）**：`Arc` 辅助（`arcForChapterNum`/`arcChapters`/`arcCompleted`/`ArcIndexByID`）、`GenerateArcSkeletonAction`（一次小调用生成全书卷骨架，`assignArcRanges` 把各卷章数换算为连续区间并强制总和等于 `chapter_count`；存在已确认/写作中章节时拒绝）、`GenerateArcOutlineAction`（按卷分批生成章纲，注入 `buildPreviousArcContext` 卷摘要前情 + `buildFutureArcsBlock` 后续卷约束）、`AppendArcAction`（追加新卷 + 生成章纲，失败回滚；无限连载增量入口）、`EnsureArcSummaries`（懒生成已完结卷的卷摘要） |
 | `internal/story/outline.go` | `generateOutline`（注入 settings 角色列表 + 按 `target_words_per_chapter` 计算大纲字数下限，不足时自动重试）、`reviseOutline`、`GenerateOutlineAction`（存在已确认章节时拒绝整体重新生成；完成后 `runOutlinePostProcessChecks`）、`ReviseOutlineAction`、`ConfirmOutlineAction`、`EditChapterOutline`（`pending`/`writing`/`review` 可编辑，`accepted` 拒绝）、`cleanJSONResponse`、`GenerateContinuationOutline`（生成后续大纲） |
 | `internal/story/outline_helpers.go` | `calcOutlineLengthRange`、`formatCharacterListForOutline`、`validateOutlineChapterLengths`、`buildOutlineDerivedCharacterContext`（写作时注入未登记大纲人物 stub） |
 | `internal/story/outline_character.go` | `CheckOutlineCharacterConsistency`、`RunOutlineCharacterCheckAndSave`、`runOutlinePostProcessChecks`（伏笔-大纲 + 大纲人物双检查） |
-| `internal/story/writing.go` | `GenerateChapterAction`（开头懒调用 `EnsureArcSummaries`；含写前大纲一致性检查，共 6 步；第 2 步经 `generateChapterContentWithLengthControl` 控字数；第 5 步更新伏笔并落盘 `Foreshadows.md`；第 6 步维护叙事记忆）、`ReviseChapterAction`/`ReviseSpecificChapterAction`（修订后同步更新伏笔与记忆；修改意见含 `> ` 引用行时经 `extractQuotedSentences`/`findParagraphsContaining`/`reviseChapterSegment` 只改匹配自然段，失败回退整章修订）、`ConfirmChapterAction`、`PolishChapterAction`、`SmoothTransitionsAction`（批量优化已确认章节衔接）、`parseFactCheckResult`（JSON 优先 + 字符串 fallback）、`checkOutlineConsistency`（写前检查本章大纲与已写剧情冲突）、`stripChapterMetaProse`、`appendIfMissingPlaceholder`（老项目旧模板缺新占位符时兜底追加）、`splitChapterOpening`、`syncMemoryAfterChapter`、`calcMemoryMaxTokens` |
+| `internal/story/writing.go` | `GenerateChapterAction`（开头懒调用 `EnsureArcSummaries`；含写前大纲一致性检查，共 3 步：大纲核对 → 撰写正文 → 事实核查；摘要/伏笔/叙事记忆/markdown 落盘**推迟到确认阶段**，章落 `StatusReview` 且 `Finalized=false`）、`ReviseChapterAction`/`ReviseSpecificChapterAction`（修订后同步更新伏笔与记忆并把章标记 `Finalized=true`；修改意见含 `> ` 引用行时经 `extractQuotedSentences`/`findParagraphsContaining`/`reviseChapterSegment` 只改匹配自然段，失败回退整章修订）、`ConfirmAndFinalizeChapterAction`（确认时补齐被推迟的摘要/伏笔/叙事记忆/markdown 并标记 `Finalized=true` 后推进指针）、`PolishChapterAction`、`SmoothTransitionsAction`（批量优化已确认章节衔接）、`parseFactCheckResult`（JSON 优先 + 字符串 fallback）、`checkOutlineConsistency`（写前检查本章大纲与已写剧情冲突）、`stripChapterMetaProse`、`appendIfMissingPlaceholder`（老项目旧模板缺新占位符时兜底追加）、`splitChapterOpening`、`syncMemoryAfterChapter`、`calcMemoryMaxTokens` |
 | `internal/story/writing_length.go` | `calcChapterLengthRange`（±1000 字或 ±15% 取较大者）、`generateChapterContentWithLengthControl`（生成/重写间 `maybeUpdateBestDraft` 保留最佳稿；略超/略低 soft 容忍跳过 adjust；仍超限 `log.chapter_length_off_range` 警告，不阻塞自动确认）、老模板 `finalizeChapterWritingPrompt` 兜底 |
-| `internal/story/writing_delete.go` | `ResolveDeleteChapterTarget` / `DeleteFrontierChapter`：清除**写作前沿**章节正文，同步回退指针、清除该章叙事记忆；`FormatWritingFrontierInfo` 注入 Agent 系统提示 |
+| `internal/story/writing_delete.go` | `ResolveDeleteChapterTarget` / `DeleteFrontierChapter`：清除**写作前沿**章节正文，同步回退指针、清除该章叙事记忆、`Finalized=false`；`RejectChapterAction`：**审核驳回**（仅当前 `review` 章），清除正文/记忆并留在本章；`FormatWritingFrontierInfo` 注入 Agent 系统提示 |
 | `internal/story/writing_conflict.go` | `analyzeWritingConflict`、`WritingConflictError`、事实核查多次失败后的根因分析与用户处理选项；`ResolveForceReviewIndex` / `PromoteWritingToReview`（冲突章或孤儿 `writing` 前沿章 → `review`） |
 | `internal/story/foreshadow.go` | `SuggestForeshadows`、`UpdateForeshadows`、伏笔格式化注入、伏笔告警、`BuildForeshadowRoadmapMarkdown`、`SaveForeshadowRoadmap`、`syncForeshadowsAfterChapter`、`NextForeshadowID`、`ForeshadowStatusLabel`；以及 `CheckForeshadowOutlineConsistency`、`RunForeshadowOutlineCheckAndSave`（大纲/伏笔变更后自动检查，报告写入 `progress.last_foreshadow_outline_report`） |
 | `internal/story/importer.go` | **v3 导入流水线**：`SplitImportContent`（本地切章：标题正则 + 无标题按 ~6000 字块切分）、`BuildImportPreview`、`ImportState`/`Load/SaveImportState`（`import.json` 断点）、`ImportStartAction`（切章落盘为 accepted → 元信息分析 → 逐章 outline/summary，每章一个检查点）、`ImportResumeAction`（断点续跑）、`createImportArcs`（≥40 章自动分卷 30 章/卷） |
@@ -136,7 +136,7 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 | `src/pages/Config.svelte` | 配置页：API 配置（含 `url_strict` 严格 URL 模式、解析后 endpoint 预览、上下文预算 tokens、连接测试结果持久化展示——结果存 `apiTestResult` store 切页不丢失，成功/失败以文字+着色卡片与按钮描边展示，修改任一影响连接的字段后自动清除）、故事配置（直接 PUT 保存 + 关键设定变更时提示协调）、写作风格与叙述视角、AI 配置变更确认面板（`ConfigChangePanel`）、角色管理、世界观管理、组织管理（卡片 + 成员勾选）、关系管理（卡片 + 源/目标实体选择）；任务运行时所有输入控件禁用 |
 | `src/pages/Outline.svelte` | 大纲页：直接操作按钮（生成/确认/修订意见/删除/生成后续大纲）+ **卷结构面板**（生成卷骨架、按卷生成/重生成章纲（可附本卷补充要求）、追加新卷）+ **导入流水线**（本地切章预览 → 开始导入 → 断点恢复横幅，`GET /api/import/status` 探测）+ `pending`/`writing`/`review` 章节点击后通过原生顶层弹窗编辑（不受页面滚动容器裁切；章节列表仅显示序号与标题；手机端适配安全边距、视口高度与可滚动内容区，写作冲突跳转时经 `sessionStorage` 聚焦冲突章）+ 流式预览 + 标题/梗概展示优先 config（`preferUserValue` 一致）+ `ConfigChangePanel` + 未登记大纲人物确认面板（SSE `outline_character_suggestions`） |
 | `src/components/ConfigChangePanel.svelte` | AI 配置变更确认面板：展示 pending 提案（当前 vs 建议）、勾选采纳 / 全部忽略；SSE `config_change_proposal` 触发 |
-| `src/pages/Writing.svelte` | 写作页（v3：正文按需经 `GET /api/chapters/{num}` 拉取，`content_rev` 变化时刷新缓存；字数展示用索引里的 `word_count`；导出走 `GET /api/export/txt`；正文以 block 列表渲染，桌面 hover 出现编辑/AI 修订/插入/删除工具条，手机直接点按段落展开/再次点按收起同等操作，内联编辑与段落级 AI 修订）：章节列表（状态点）+ 直接操作（生成/确认/修改意见/去AI味，自动区分当前章修订与定向修订）+ 正文框选后浮动「引用到修改意见」按钮（插入 `> ` 引用行，触发段落级修订）+ 事实核查冲突处理面板（`pending_writing_conflict`：改大纲/伏笔/重试/`force_review`；`dismiss`≡保留稿进入审核）+ 孤儿 `writing` 恢复条（无 conflict 记录时仍可重新生成或进入审核）+ 自动确认模式开关（toggle，随时可开关）+ 伏笔追踪摘要卡片（活跃/超期/临近回收）+ 优化章节衔接（进度卡片工具栏小按钮，已确认 ≥ 2 章时显示）+ 导出 TXT + 复制 + 上下章导航 + 流式尾部窗口展示（含「仅显示最新内容」提示；任务进行中当前章显示 taskTokenUsage，空闲时以 `countProseUnits` 显示正文字数）+ rAF 自动滚动（自动确认模式下自动跟随正在生成的章节）+ 全书完成后展示 `PostProcessPanel` |
+| `src/pages/Writing.svelte` | 写作页（v3：正文按需经 `GET /api/chapters/{num}` 拉取，`content_rev` 变化时刷新缓存；字数展示用索引里的 `word_count`；导出走 `GET /api/export/txt`；正文以 block 列表渲染，桌面 hover 出现编辑/AI 修订/插入/删除工具条，手机直接点按段落展开/再次点按收起同等操作，内联编辑与段落级 AI 修订）：章节列表（状态点）+ 直接操作（生成/确认/修改意见/去AI味，自动区分当前章修订与定向修订；确认改为异步，确认时补齐摘要/记忆）+ **审核驳回**按钮（当前 `review` 章，ConfirmModal 确认）+ **写作回退**按钮（DELETE `/api/chapter`，仅当写作前沿可删时显示，ConfirmModal 确认）+ 正文框选后浮动「引用到修改意见」按钮（插入 `> ` 引用行，触发段落级修订）+ 事实核查冲突处理面板（`pending_writing_conflict`：改大纲/伏笔/重试/`force_review`；`dismiss`≡保留稿进入审核）+ 孤儿 `writing` 恢复条（无 conflict 记录时仍可重新生成或进入审核）+ 自动确认模式开关（toggle，随时可开关）+ 伏笔追踪摘要卡片（活跃/超期/临近回收）+ 优化章节衔接（进度卡片工具栏小按钮，已确认 ≥ 2 章时显示）+ 导出 TXT + 复制 + 上下章导航 + 流式尾部窗口展示（含「仅显示最新内容」提示；任务进行中当前章显示 taskTokenUsage，空闲时以 `countProseUnits` 显示正文字数）+ rAF 自动滚动（自动确认模式下自动跟随正在生成的章节）+ 全书完成后展示 `PostProcessPanel` |
 | `src/components/TaskTokenBadge.svelte` | 任务 token 展示（`↑ prompt ↓ completion tokens`）；对 `taskTokenUsage` 更新做线性 rAF 插值，动画时长 = `TOKEN_POLL_INTERVAL_MS`；目标值低于当前显示值时该维度从 0 重新向上插值（新一段统计或估算修正）；供 ChatPanel / App 顶栏 / Writing 页复用 |
 | `src/pages/Foreshadows.svelte` | 伏笔页：统计概览 + AI 设计伏笔 + 手动 CRUD + AI 建议确认面板（SSE `foreshadow_suggestions`）+ 伏笔-大纲冲突报告卡片（`last_foreshadow_outline_report`）+ 列表/章节时间线/路线图文档三视图 + 复制/下载 `Foreshadows.md` |
 | `src/pages/Memory.svelte` | 叙事记忆页（只读）：从 `progress.memory_entries` 展示统计（条数/覆盖章节/token 上限/内容字数）+ 列表/按章节时间线两视图 + 分类/章节筛选 + 原文片段预览（v3：片段由后端在 `snippet` 字段解析下发）+ 刷新/复制 |
@@ -202,7 +202,7 @@ func (h *Handlers) PostXxxAction(w http.ResponseWriter, r *http.Request) {
 
 ### 自动确认模式
 
-`Handlers.autoConfirm`（`taskMu` 保护）为运行时开关，不持久化。`GET/PUT /api/autoconfirm` 读取/切换，任务运行期间也可随时开关。开启后 `PostChapterGenerate` 的任务 goroutine 进入循环：生成章节 → 若开关仍开启则 `ConfirmChapterAction` 自动确认 → 继续生成下一章，直到全部完成、开关被关闭（当前章生成完后停在 review 状态）、任务被取消或出错。整个循环在同一个任务锁内执行，期间仍受任务互斥保护。`GET /api/status` 返回 `auto_confirm` 及任务运行中的 `token_usage` 字段。前端开关位于写作页进度卡片（toggle），开启时流式输出自动跟随正在生成的章节。
+`Handlers.autoConfirm`（`taskMu` 保护）为运行时开关，不持久化。`GET/PUT /api/autoconfirm` 读取/切换，任务运行期间也可随时开关。开启后 `PostChapterGenerate` 的任务 goroutine 进入循环：生成章节（正文 → 停在 `review`）→ 若开关仍开启则 `ConfirmAndFinalizeChapterAction` 确认并补齐摘要/伏笔/记忆 → 继续生成下一章，直到全部完成、开关被关闭（当前章生成完后停在 review 状态）、任务被取消或出错。整个循环在同一个任务锁内执行，期间仍受任务互斥保护。`GET /api/status` 返回 `auto_confirm` 及任务运行中的 `token_usage` 字段。前端开关位于写作页进度卡片（toggle），开启时流式输出自动跟随正在生成的章节。
 
 ### 流式输出节流 + 尾部窗口（前端性能）
 
@@ -329,9 +329,13 @@ API 配置（`APIConfig`）与故事配置（`Config`）完全分离，分别保
 
 ```
 pending → writing → review → accepted
- ↗
- （修改后回到 review）
+ ↗                          ↑
+ （修改后回到 review）      （确认补摘要/记忆后推进，Finalized=true）
 ```
+
+### 分阶段写作（v4）
+
+`GenerateChapterAction` 只完成正文相关三步（大纲核对 → 撰写正文 → 事实核查），然后停在 `review` 且 `Finalized=false`。摘要提炼、伏笔更新、叙事记忆维护、markdown 落盘**延迟到用户确认或自动确认时**由 `ConfirmAndFinalizeChapterAction` 一次性补齐。这样章节若被**驳回**（`POST /api/chapter/reject`）或**写作回退**（`DELETE /api/chapter`）重写，就不必浪费那两步 LLM 调用。驱动依赖（后续章节需前章摘要/记忆）天然满足：下一章节只在确认推进指针后才开始，确认时已补齐前章产物。定向/整章修订（`ReviseChapterAction`/`ReviseSpecificChapterAction`）属有意编辑，仍内联重新计算摘要/记忆并置 `Finalized=true`。
 
 ### 事实核查冲突恢复
 
@@ -364,14 +368,14 @@ pending → writing → review → accepted
 ```
 
 写作时：`formatActiveForeshadowsForChapterLang` 注入活跃伏笔到 `ChapterWriting` prompt。  
-章末：`GenerateChapterAction` / `ReviseChapterAction` / `ReviseSpecificChapterAction` 调用 `syncForeshadowsAfterChapter`（AI 更新状态 + events + resolution），并写入项目目录 `Foreshadows.md` 路线图。  
+章末：分阶段写作下，`GenerateChapterAction` 不再立即同步伏笔，改在章节**确认时**（`ConfirmAndFinalizeChapterAction`）或修订时（`ReviseChapterAction` / `ReviseSpecificChapterAction`）调用 `syncForeshadowsAfterChapter`（AI 更新状态 + events + resolution），并写入项目目录 `Foreshadows.md` 路线图。  
 超期：`BuildForeshadowWarnings` 在日志面板告警（超过预计回收章 3 章以上）。
 
 前端「伏笔」页提供列表、按章节时间线、Markdown 路线图预览；SSE `foreshadow_suggestions` 触发建议确认面板。
 
 ### 叙事记忆系统
 
-弥补历史摘要窗口（5 章）之外的叙事细节丢失。每章写作完成后（`GenerateChapterAction` 第 6 步），AI 从正文中提取大纲未体现的关键叙事细节，存入 `Progress.MemoryEntries`。
+弥补历史摘要窗口（5 章）之外的叙事细节丢失。每章正文完成后，摘要/记忆不会立即生成；在章节**确认时**（`ConfirmAndFinalizeChapterAction`，或修订后 `ReviseChapterAction`/`ReviseSpecificChapterAction`），AI 从正文中提取大纲未体现的关键叙事细节，存入 `Progress.MemoryEntries`。
 
 **数据结构**：`MemoryEntry` 含 `ID`、`Content`（关键细节描述）、`Category`（character/location/item/event/promise/other）、`Chapter`（来源章节号）、`Position`（段落序号，用于自动截取原文片段）。
 
@@ -516,7 +520,8 @@ API 配置保存 `api.json`，故事配置保存 `config.json`。设定保存 `s
 | GET | `/api/chapter/conflict` | 同步 | 获取待处理写作冲突（`pending_writing_conflict`） |
 | POST | `/api/chapter/conflict-resolve` | 同步 | 处理写作冲突或孤儿 `writing`：`retry`（需有 conflict）；`force_review`/`dismiss`（≡保留稿→`review`，无 conflict 时也对当前 `writing` 前沿章生效） |
 | POST | `/api/foreshadows/outline-check` | 异步 | 手动触发伏笔-大纲一致性检查 |
-| POST | `/api/chapter/confirm` | 同步 | 确认章节 |
+| POST | `/api/chapter/confirm` | 异步 | 确认章节（v4 分阶段：确认时异步补齐摘要/伏笔/记忆后推进指针，任务名 `chapter_confirm`） |
+| POST | `/api/chapter/reject` | 同步 | 审核驳回当前 `review` 章（清除其正文/记忆并回退指针，可重新生成） |
 | POST | `/api/chapter/edit` | 同步 | 局部编辑章节正文（`replace_lines`/`replace_text`/`insert_after_line`/`append`） |
 | POST | `/api/chapter/revise` | 异步 | 修订当前审核中章节 |
 | POST | `/api/chapter/revise/{num}` | 异步 | 定向最小化修订指定章节（含已确认章节，不影响其他章节） |

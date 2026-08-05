@@ -28,6 +28,13 @@ type ChapterState struct {
 	Blocks      []Block `json:"blocks,omitempty"`
 	NextBlockID int     `json:"next_block_id,omitempty"`
 	BlockSep    string  `json:"block_sep,omitempty"`
+	// Finalized marks whether the deferred post-writing artifacts (summary,
+	// foreshadow update, narrative memory, markdown file) have been generated.
+	// Because of the "confirm first, then finalize" flow, a chapter in review
+	// awaiting confirm has Finalized=false; it is set true on confirm (see
+	// ConfirmAndFinalizeChapterAction). False for legacy/aged projects it
+	// means the artifacts were produced by the older all-in-one generate path.
+	Finalized bool `json:"finalized,omitempty"`
 }
 
 type ForeshadowStatus string

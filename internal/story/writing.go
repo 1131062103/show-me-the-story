@@ -148,7 +148,7 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 	// 写前检查：本章大纲若已与实际写出的剧情冲突（如大纲安排初遇但前文已认识），
 	// 先最小化修订大纲再动笔，避免按过时大纲写出矛盾内容。
 	if i > 0 {
-		logger.StepInfo(1, 6, "正在检查本章大纲与当前剧情的一致性...")
+		logger.StepInfo(1, 3, "正在检查本章大纲与当前剧情的一致性...")
 		revised, err := checkOutlineConsistency(ctx, apiCfg, cfg, state, i, logger)
 		if err != nil {
 			logger.WarnKey("log.outline_check_failed", err)
@@ -174,7 +174,7 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 		if ctx.Err() != nil {
 			return fmt.Errorf("任务已取消")
 		}
-		logger.StepInfo(2, 6, "正在构思并撰写正文...")
+		logger.StepInfo(2, 3, "正在构思并撰写正文...")
 		content, err := generateChapterContentWithLengthControl(ctx, apiCfg, cfg, state, i, settings, extraConstraints, logger)
 		if err != nil {
 			return err
@@ -185,15 +185,7 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 		ch.Content = content
 		logger.InfoKey("log.prose_done", prose.CountProseUnits(content))
 
-		logger.StepInfo(3, 6, "正在提炼本章摘要...")
-		summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, content, logger)
-		if summary == "" {
-			return fmt.Errorf("摘要提炼失败或被取消")
-		}
-		ch.Summary = summary
-		logger.InfoKey("log.summary_done")
-
-		logger.StepInfo(4, 6, "正在对本章进行事实核查...")
+		logger.StepInfo(3, 3, "正在对本章进行事实核查...")
 		historySummary := buildHistorySummary(state, i)
 		factCheckResult := generateChapterFactCheckWithRetryLog(ctx, apiCfg, cfg, state, i, content, historySummary, logger)
 
@@ -224,11 +216,6 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 					return fmt.Errorf("正文生成失败或被取消")
 				}
 				ch.Content = content
-				summary = generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, content, logger)
-				if summary == "" {
-					return fmt.Errorf("摘要提炼失败或被取消")
-				}
-				ch.Summary = summary
 				factCheckResult = generateChapterFactCheckWithRetryLog(ctx, apiCfg, cfg, state, i, content, historySummary, logger)
 				failed, issues = parseFactCheckResult(factCheckResult)
 				if failed {
@@ -255,16 +242,9 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 
 	state.PendingWritingConflict = nil
 
-	if len(state.Foreshadows) > 0 {
-		logger.StepInfo(5, 6, "正在更新伏笔状态...")
-		syncForeshadowsAfterChapter(ctx, apiCfg, cfg, state, i, progressPath, logger)
-	}
-
-	logger.StepInfo(6, 6, "正在维护叙事记忆...")
-	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, i, progressPath, logger)
-
-	SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
-
+	// v4（分阶段）：摘要、伏笔更新、叙事记忆与 markdown 落盘推迟到用户确认后
+	// （ConfirmAndFinalizeChapterAction）再生成，避免章节被驳回/回退时浪费这两步调用。
+	ch.Finalized = false
 	ch.Status = StatusReview
 	state.CurrentChapterIndex = i
 	if err := SaveProgress(progressPath, state); err != nil {
@@ -412,6 +392,12 @@ func ReviseChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *con
 
 	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, chapterIdx, progressPath, logger)
 
+	// 修订已重新生成摘要与记忆，章节视为已完成后处理（Finalized）。
+	ch.Finalized = true
+	if err := SaveProgress(progressPath, state); err != nil {
+		return err
+	}
+
 	logger.SuccessKey("log.chapter_revised")
 	return nil
 }
@@ -477,11 +463,24 @@ func ReviseSpecificChapterAction(ctx context.Context, apiCfg *config.APIConfig, 
 
 	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, chapterIdx, progressPath, logger)
 
+	// 定向修订已重新生成摘要与记忆，章节视为已完成后处理。
+	ch.Finalized = true
+	if err := SaveProgress(progressPath, state); err != nil {
+		return err
+	}
+
 	logger.SuccessKey("log.chapter_specific_done", ch.Num)
 	return nil
 }
 
-func ConfirmChapterAction(state *Progress, progressPath string) error {
+// ConfirmAndFinalizeChapterAction 确认当前审核章节，并在确认的同时补齐被推迟的
+// 后处理产物（摘要、伏笔更新、叙事记忆、markdown 文件），然后推进写作指针。
+// 这是分阶段写作的核心：正文在 GenerateChapterAction 完成，摘要/记忆等延迟到用户
+// 确认后再生成，避免章节被驳回/回退时浪费这两步 LLM 调用。
+func ConfirmAndFinalizeChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, state *Progress, progressPath string, settings *ProjectSettings, logger *sse.LogBroadcaster) error {
+	if err := llm.ValidateConfig(apiCfg); err != nil {
+		return err
+	}
 	if state.Phase != "writing" {
 		return fmt.Errorf("当前不在写作阶段")
 	}
@@ -496,9 +495,39 @@ func ConfirmChapterAction(state *Progress, progressPath string) error {
 		return fmt.Errorf("当前章节不在审核状态，无法确认")
 	}
 
+	logger.InfoKey("log.chapter_confirming", ch.Num, ch.Title)
+
+	// 先补齐本章后处理产物（需 ch.Content），再推进指针。
+	if !ch.Finalized {
+		logger.StepInfo(1, 3, "正在提炼本章摘要...")
+		summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, ch.Content, logger)
+		if summary == "" {
+			logger.WarnKey("log.finalize_summary_failed", ch.Num)
+		} else {
+			ch.Summary = summary
+			logger.InfoKey("log.summary_done")
+		}
+
+		logger.StepInfo(2, 3, "正在更新伏笔状态...")
+		if len(state.Foreshadows) > 0 {
+			syncForeshadowsAfterChapter(ctx, apiCfg, cfg, state, chapterIdx, progressPath, logger)
+		}
+
+		logger.StepInfo(3, 3, "正在维护叙事记忆...")
+		syncMemoryAfterChapter(ctx, apiCfg, cfg, state, chapterIdx, progressPath, logger)
+
+		SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
+		ch.Finalized = true
+	}
+
 	ch.Status = StatusAccepted
 	state.CurrentChapterIndex = chapterIdx + 1
-	return SaveProgress(progressPath, state)
+	if err := SaveProgress(progressPath, state); err != nil {
+		return err
+	}
+
+	logger.SuccessKey("log.chapter_confirmed", ch.Num)
+	return nil
 }
 
 func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, state *Progress, idx int, settings *ProjectSettings, extraWritingConstraints string, logger *sse.LogBroadcaster) (string, error) {

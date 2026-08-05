@@ -945,7 +945,8 @@ func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
 			if !h.isAutoConfirmOn() {
 				break
 			}
-			if err := story.ConfirmChapterAction(h.state, h.progressPath); err != nil {
+			// 确认的同时补齐被推迟的摘要/伏笔/记忆（分阶段写作）。
+			if err := story.ConfirmAndFinalizeChapterAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, h.settings, h.logger); err != nil {
 				h.logger.WarnKey("log.chapter_autoconfirm_failed", err)
 				break
 			}
@@ -1054,23 +1055,67 @@ func (h *Handlers) PostForeshadowOutlineCheck(w http.ResponseWriter, r *http.Req
 }
 
 func (h *Handlers) PostChapterConfirm(w http.ResponseWriter, r *http.Request) {
-	if h.isTaskRunning() {
-		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
-		return
-	}
-
 	if h.state.Phase != "writing" {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "phase_not_writing")
 		return
 	}
-
-	if err := story.ConfirmChapterAction(h.state, h.progressPath); err != nil {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+	if !h.tryStartTask() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
 		return
 	}
 
-	ch := h.state.Chapters[h.state.CurrentChapterIndex-1]
-	h.logger.SuccessKey("log.chapter_confirmed", ch.Num)
+	go func() {
+		defer h.endTask()
+		h.logger.TaskStart("chapter_confirm")
+		ctx := h.taskCtx
+
+		// 确认时补齐被推迟的摘要/伏笔/叙事记忆后，再推进写作指针。
+		if err := story.ConfirmAndFinalizeChapterAction(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, h.settings, h.logger); err != nil {
+			if ctx.Err() != nil {
+				h.logger.WarnKey("log.chapter_confirm_cancelled")
+			} else {
+				h.logger.ErrorKey("log.chapter_confirm_failed", err)
+			}
+			h.logger.TaskEnd("chapter_confirm", false)
+			h.broadcastProgress()
+			return
+		}
+
+		h.logger.TaskEnd("chapter_confirm", true)
+		h.broadcastProgress()
+	}()
+
+	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+// PostChapterReject 审核驳回：用户对当前审核（review）章节明确否定。
+// 与写作回退（DELETE /api/chapter）不同，仅对正等待确认的 review 章节生效，
+// 清除该章正文与该章记忆并回退指针，供用户重新生成。
+func (h *Handlers) PostChapterReject(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "delete_chapter_locked")
+		return
+	}
+
+	num, err := story.RejectChapterAction(h.state, h.projectDir())
+	if err != nil {
+		switch err {
+		case story.ErrNoChaptersToDelete:
+			h.writeErrorReq(w, r, http.StatusBadRequest, "no_chapters_to_delete")
+		case story.ErrReviewRejectUnavailable:
+			h.writeErrorReq(w, r, http.StatusConflict, "review_reject_unavailable")
+		default:
+			h.writeErrorReq(w, r, http.StatusInternalServerError, "save_progress_failed", err.Error())
+		}
+		return
+	}
+
+	if err := story.SaveProgress(h.progressPath, h.state); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_progress_failed", err.Error())
+		return
+	}
+
+	h.logger.SuccessKey("log.chapter_rejected", num)
 	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
 }
 

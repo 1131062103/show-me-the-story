@@ -76,6 +76,26 @@ var messageCatalog = map[string]map[string]string{
 		LangZH: "自动确认失败: %s",
 		LangEN: "Auto-confirm failed: %s",
 	},
+	"log.chapter_confirming": {
+		LangZH: "正在确认第 %d 章并补齐摘要/伏笔/记忆...",
+		LangEN: "Confirming chapter %d and finalising summary/foreshadows/memory...",
+	},
+	"log.chapter_confirm_failed": {
+		LangZH: "章节确认失败: %s",
+		LangEN: "Chapter confirmation failed: %s",
+	},
+	"log.chapter_confirm_cancelled": {
+		LangZH: "章节确认已取消。",
+		LangEN: "Chapter confirmation cancelled.",
+	},
+	"log.chapter_rejected": {
+		LangZH: "第 %d 章已驳回。",
+		LangEN: "Chapter %d rejected.",
+	},
+	"log.finalize_summary_failed": {
+		LangZH: "确认时第 %d 章摘要提炼失败，章节仍可确认。",
+		LangEN: "Summary extraction failed for chapter %d during confirmation; the chapter can still be confirmed.",
+	},
 	"log.chapter_autoconfirmed": {
 		LangZH: "第 %d 章《%s》已自动确认。",
 		LangEN: "Chapter %d \"%s\" auto-confirmed.",

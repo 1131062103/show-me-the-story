@@ -171,6 +171,10 @@ var errorCatalog = map[string]map[string]string{
 		LangZH: "有任务正在运行，无法删除章节",
 		LangEN: "A task is running; cannot delete chapter",
 	},
+	"review_reject_unavailable": {
+		LangZH: "当前章节不在审核状态，无法驳回",
+		LangEN: "No chapter awaiting review can be rejected",
+	},
 	"delete_outline_locked": {
 		LangZH: "有任务正在运行，无法删除大纲",
 		LangEN: "A task is running; cannot delete outline",

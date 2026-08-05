@@ -1428,7 +1428,8 @@ func getBuiltinTools() []Tool {
 				if ctx.State.Phase != "writing" {
 					return "", agentErr(ctx, "phase_not_writing")
 				}
-				if err := story.ConfirmChapterAction(ctx.State, ctx.ProgressPath); err != nil {
+				// 分阶段写作：确认时补齐摘要/伏笔/叙事记忆后推进指针。
+				if err := story.ConfirmAndFinalizeChapterAction(context.Background(), ctx.APICfg, ctx.Config, ctx.State, ctx.ProgressPath, ctx.Settings, ctx.Logger); err != nil {
 					return "", err
 				}
 				ch := ctx.State.Chapters[ctx.State.CurrentChapterIndex-1]

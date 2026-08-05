@@ -58,6 +58,17 @@
   $: isCurrent = ch && currentIdx === $selectedChapter;
   $: isStreamingThis = $streamingChapterIdx === $selectedChapter && $streamingContent;
 
+  // 写作回退（DELETE /api/chapter）：仅确认前沿可删（已确认的前沿章且其后一章未开写，或全书确认后的最后一章）。
+  // review 当前章的交集交给「驳回」按钮处理，避免两按钮行为重复。
+  $: canRollback = (() => {
+    if (!ch) return false;
+    if (ch.status === 'accepted' && currentIdx === $selectedChapter + 1 && currentIdx < chapters.length && chapters[currentIdx]?.status === 'pending') return true;
+    if (ch.status === 'accepted' && currentIdx >= chapters.length && $selectedChapter === chapters.length - 1) return true;
+    return false;
+  })();
+  // 审核驳回：仅当前章的审核状态可驳回（只对 review 生效）
+  $: canReject = isCurrent && ch?.status === 'review';
+
   // v3: /api/progress 不再携带正文，选中章节的正文按需拉取，content_rev 变化时刷新
   let chapterContent = '';
   let chapterBlocks = [];
@@ -314,15 +325,42 @@
 
   async function doConfirm() {
     try {
+      // v4 分阶段写作：确认是异步任务，确认时补齐摘要/伏笔/记忆后推进指针
       await api('POST', '/api/chapter/confirm');
-      progress.set(await api('GET', '/api/progress'));
-      addToast($t('writing.toasts.confirmed', { num: ch?.num }), 'success');
-      // 跳到下一章
-      const next = await api('GET', '/api/progress');
-      if (next.current_chapter_index < (next.chapters || []).length) {
-        selectedChapter.set(next.current_chapter_index);
+      addToast($t('writing.toasts.confirming', { num: ch?.num }), 'info');
+      if (!isCurrent || currentIdx >= chapters.length - 1) {
+        // 选中章节不是写作前沿时，重新拉取一次以反映指针推进
+        progress.set(await api('GET', '/api/progress'));
       }
     } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  async function doReject() {
+    if (!ch) return;
+    confirmModal.set({
+      message: $t('writing.confirm.reject', { num: ch.num }),
+      onConfirm: async () => {
+        try {
+          await api('POST', '/api/chapter/reject');
+          progress.set(await api('GET', '/api/progress'));
+          addToast($t('writing.toasts.rejected', { num: ch.num }), 'success');
+        } catch (e) { addToast(e.message, 'error'); }
+      },
+    });
+  }
+
+  async function doDeleteChapter() {
+    if (!ch) return;
+    confirmModal.set({
+      message: $t('writing.confirm.deleteChapter', { num: ch.num }),
+      onConfirm: async () => {
+        try {
+          await api('DELETE', '/api/chapter');
+          progress.set(await api('GET', '/api/progress'));
+          addToast($t('writing.toasts.deleteChapterDone'), 'success');
+        } catch (e) { addToast(e.message, 'error'); }
+      },
+    });
   }
 
   async function doRevise() {
@@ -647,6 +685,10 @@
                 {/if}
                 {#if ch.status === 'review' && isCurrent}
                   <button class="btn btn-success btn-sm" on:click={doConfirm} disabled={$taskRunning}>{$t('writing.btn.confirm')}</button>
+                  <button class="btn btn-outline btn-sm" on:click={doReject} disabled={$taskRunning} title={$t('writing.btn.reject.tip')}>{$t('writing.btn.reject')}</button>
+                {/if}
+                {#if canRollback}
+                  <button class="btn btn-ghost btn-sm text-error" on:click={doDeleteChapter} disabled={$taskRunning} title={$t('writing.btn.deleteChapter.tip')}>{$t('writing.btn.deleteChapter')}</button>
                 {/if}
                 {#if hasContent && ch.status !== 'writing'}
                   <button class="btn btn-ghost btn-sm" on:click={() => showRevise = !showRevise} disabled={$taskRunning}>{$t('writing.btn.revise')}</button>

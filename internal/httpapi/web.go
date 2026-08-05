@@ -74,6 +74,7 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("POST /api/chapter/conflict-resolve", h.PostChapterConflictResolve)
 	mux.HandleFunc("POST /api/foreshadows/outline-check", h.PostForeshadowOutlineCheck)
 	mux.HandleFunc("POST /api/chapter/confirm", h.PostChapterConfirm)
+	mux.HandleFunc("POST /api/chapter/reject", h.PostChapterReject)
 	mux.HandleFunc("POST /api/chapter/edit", h.PostChapterEdit)
 	mux.HandleFunc("POST /api/chapter/revise", h.PostChapterRevise)
 	mux.HandleFunc("POST /api/chapter/revise/{num}", h.PostChapterReviseSpecific)
