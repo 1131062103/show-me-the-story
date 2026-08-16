@@ -9,6 +9,7 @@
 - **Go 版本**：1.25.1
 - **模块名**：`showmethestory`
 - **默认端口**：`:48090`（可通过 `PORT` 环境变量覆盖）
+- **浏览器启动**：Windows/macOS 自动打开 Web UI；Linux/Android 仅打印访问地址。Android/Termux 会拦截 Go `os/exec` 查找浏览器时使用的 `faccessat2` 系统调用，自动打开会导致 `SIGSYS` 并终止进程。
 - **前端**：Vite 5 + Svelte 4 + Tailwind CSS 4 + DaisyUI 5（xianii 暗色主题）
 - **项目目录**：`storys/`（程序同目录下，每个故事项目一个子目录）
 - **多语言**：每个项目在创建时选择 `zh` / `en`，决定 AI 提示词、生成正文、内置技能与 Agent 系统提示；前端 UI 语言独立可切换

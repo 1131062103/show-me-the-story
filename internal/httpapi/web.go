@@ -195,8 +195,11 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 	fmt.Printf(" [系统] 程序目录: %s\n", progDir)
 	fmt.Printf(" [系统] 项目目录: %s\n", filepath.Join(progDir, "storys"))
 
-	go openBrowser(fmt.Sprintf("http://localhost%s", port))
-
+	// Android blocks the faccessat2 syscall used by Go's exec.LookPath.
+	// Do not auto-launch a browser there; the URL above can be opened manually.
+	if runtime.GOOS != "linux" {
+		go openBrowser(fmt.Sprintf("http://localhost%s", port))
+	}
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, " [错误] 服务器启动失败: %v\n", err)
 		os.Exit(1)
