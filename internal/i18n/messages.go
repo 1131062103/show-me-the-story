@@ -721,8 +721,8 @@ var messageCatalog = map[string]map[string]string{
 		LangEN: "Agent API call failed: %v",
 	},
 	"agent.output_truncated": {
-		LangZH: "助理回复因输出 token 上限（max_tokens=%d）被截断，工具调用未完成。请在配置页增大 max_tokens，或缩短修改意见后点击「重试」重新发送。",
-		LangEN: "Assistant output was cut off at the max_tokens limit (%d). The tool call did not complete. Increase max_tokens on the Config page, shorten your message, then click Retry to resend.",
+		LangZH: "助理回复因输出 token 上限（max_tokens=%d）被截断，工具调用未完成。请在系统配置页增大 max_tokens，或缩短修改意见后点击「重试」重新发送。",
+		LangEN: "Assistant output was cut off at the max_tokens limit (%d). The tool call did not complete. Increase max_tokens on the System page, shorten your message, then click Retry to resend.",
 	},
 	"agent.tool_call_parse_retry_hint": {
 		LangZH: "[工具调用解析失败 — 请重试一次]\n原因标记: %s；当前 Agent max_tokens=%d。\n你上一条输出中的 <tool_call> 未能解析（常见原因：缺少 </tool_call>、JSON 被截断/不完整、arguments 过长、非法转义）。\n请自行分析上一条输出的问题后重试：只输出一个完整合法的 <tool_call>...</tool_call>（标签内为合法 JSON 对象）。\n若 story_synopsis / writing_style 等字段很长，请拆成多次 update_project_config，每次只更新少量字段。\n不要解释，直接输出工具调用。",

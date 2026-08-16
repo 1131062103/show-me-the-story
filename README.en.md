@@ -53,17 +53,17 @@ Then open `http://localhost:48090` (the port can be overridden via the `PORT` en
 
 ### 3. Configure the API
 
-On first launch you will be asked to create a project. Once a project is open, the "Config" page asks for:
+On first launch you will be asked to create a project. Once a project is open, the "System" page asks for:
 
 - **API base URL**: OpenAI-compatible base URL (the app appends `/chat/completions`), e.g. `https://api.deepseek.com`, `https://api.openai.com/v1`, `https://api.z.ai/api/paas/v4`; a bare hostname gets `/v1` added automatically. For non-standard paths (e.g. z.ai Coding Plan), enable **Strict URL mode**
-- **Model name**: e.g. `deepseek-chat`, `gpt-4o`
+- **Model**: click "Fetch models" to pull the available model list from the endpoint and pick from a dropdown (manual entry is still possible); selecting a profile probes the model context window automatically
 - **API key**: leave empty for local models
 
-API configuration is shared across all projects.
+API configuration is shared across all projects. You can save **multiple API profiles** (e.g. one each for z.ai / DeepSeek / OpenAI) and switch between them anytime; the active profile drives all AI calls. The same page also lets you view and edit all **AI writing prompts** (bound to the project language, stored in the project's `config.json`).
 
 ### 4. Start writing
 
-1. **Configure the story**: on the Config page set genre, chapter count, target words per chapter, writing style, etc. Characters / world / organizations / relations can be added manually, or generated in one click with "AI generate settings".
+1. **Configure the story**: on the Story page set genre, chapter count, target words per chapter, writing style, etc. Characters / world / organizations / relations can be added manually, or generated in one click with "AI generate settings".
 2. **Generate the outline**: on the Outline page, click generate. The AI outputs the full chapter outline. You can ask for revisions globally, or edit individual chapters inline; confirm when satisfied.
 3. **Write chapter by chapter**: on the Writing page, click generate. The AI streams the prose and fact-checks it when done → waits for your review. On confirm, the AI finalises the summary/memory (rejectable/rollback-able, so no wasted calls). Confirm to move on, or leave feedback to have the AI revise (select a passage and click **Quote** to revise only the matching paragraph; falls back to full-chapter revision if localization fails).
 4. **Want it hands-free?** Toggle "Auto-confirm": the AI will keep writing chapter after chapter until done. You can toggle it off at any time.
@@ -126,7 +126,7 @@ After every chapter is confirmed, the writing page surfaces a "Full-book optimis
 2. **Review the roadmap**: tick items, edit feedback, optionally enable "smooth transitions first" or "attach de-AI polish".
 3. **Execute selected items**: per-chapter minimal edits; once each item is done you can inspect a diff preview.
 
-For best results, use a large-context model and set "context budget" on the Config page to roughly 900000 (a 1M-token model).
+For best results, use a large-context model and set "context budget" on the System page to roughly 900000 (a 1M-token model).
 
 ### AI assistant
 
@@ -162,7 +162,7 @@ The chat panel on the right (or the dedicated "Assistant" page) is an AI that ca
 
 | Task | Prefer |
 |------|--------|
-| **Change total chapter count / full outline regen** | Config page → set count & words → Outline page → Delete outline → Generate. If using the assistant, say explicitly "change to N chapters and regenerate the full outline", then verify the count. |
+| **Change total chapter count / full outline regen** | Story page → set count & words → Outline page → Delete outline → Generate. If using the assistant, say explicitly "change to N chapters and regenerate the full outline", then verify the count. |
 | **Full outline regen after confirmed chapters** | `generate_outline` is rejected. Use "Generate continuation outline" on the Outline page, or start a new project. |
 | **Shrink chapter count** | Do not say "delete chapters 13–30" — `delete_chapters_from` only clears prose, not outline entries. To reduce count: update config + regenerate outline. |
 | **Full-book optimisation** | Use the Full-book optimisation panel on the Writing page. |
@@ -186,7 +186,7 @@ The chat panel on the right (or the dedicated "Assistant" page) is an AI that ca
 
 1. Editing a chapter ≠ deleting it; the assistant must not use delete tools for edits.
 2. Delete operations need your explicit confirmation after the assistant restates the scope.
-3. Fields you already filled on the Config page are not overwritten silently.
+3. Fields you already filled on the Story page are not overwritten silently.
 4. Only one AI task at a time; editing is disabled while a task runs.
 
 ## Data and files
@@ -250,7 +250,7 @@ The recommended chapter limit is primarily determined by the **token window** (o
 
 ### Full-book optimisation context budget
 
-The full-book optimisation (diagnosis + consistency check + roadmap) requires the entire text or summaries. The "context budget" on the Config page determines usable capacity (65 % is reserved as a safety margin):
+The full-book optimisation (diagnosis + consistency check + roadmap) requires the entire text or summaries. The "context budget" on the System page determines usable capacity (65 % is reserved as a safety margin):
 
 | Book size | Recommended context_budget_tokens | Notes |
 |-----------|----------------------------------|-------|

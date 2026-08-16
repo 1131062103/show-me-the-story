@@ -17,16 +17,18 @@ import (
 	"showmethestory/internal/prose"
 	"showmethestory/internal/sse"
 	"showmethestory/internal/story"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
 type Handlers struct {
-	apiCfg     *config.APIConfig
-	apiCfgPath string
-	logger     *sse.LogBroadcaster
-	version    string
+	apiProfiles *config.APIProfiles
+	apiCfg      *config.APIConfig // active profile (kept in sync via refreshActiveAPI)
+	apiCfgPath  string
+	logger      *sse.LogBroadcaster
+	version     string
 
 	// Project management
 	progDir     string
@@ -58,20 +60,34 @@ type Handlers struct {
 	lastReconcileBody config.StoryConfig // 缓存最后的设定协调请求
 }
 
-func NewHandlers(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.LogBroadcaster, progDir string, version string) *Handlers {
+func NewHandlers(apiProfiles *config.APIProfiles, apiCfgPath string, logger *sse.LogBroadcaster, progDir string, version string) *Handlers {
+	if apiProfiles == nil {
+		apiProfiles = config.NewAPIProfiles()
+	}
 	return &Handlers{
-		apiCfg:     apiCfg,
-		apiCfgPath: apiCfgPath,
-		logger:     logger,
-		version:    version,
-		progDir:    progDir,
-		cfg:        config.DefaultConfig(),
-		state:      &story.Progress{Phase: "outline"},
-		settings:   &story.ProjectSettings{},
+		apiProfiles: apiProfiles,
+		apiCfg:      apiProfiles.ActiveConfig(),
+		apiCfgPath:  apiCfgPath,
+		logger:      logger,
+		version:     version,
+		progDir:     progDir,
+		cfg:         config.DefaultConfig(),
+		state:       &story.Progress{Phase: "outline"},
+		settings:    &story.ProjectSettings{},
 		postprocess: &story.PostProcessState{
 			ExecuteOptions: &story.PostProcessExecuteOptions{RunSmoothTransitionsFirst: true},
 		},
 	}
+}
+
+// saveAPIProfiles persists the whole profile store to api.json.
+func (h *Handlers) saveAPIProfiles() error {
+	return config.SaveAPIProfiles(h.apiCfgPath, h.apiProfiles)
+}
+
+// refreshActiveAPI points h.apiCfg at the currently active profile.
+func (h *Handlers) refreshActiveAPI() {
+	h.apiCfg = h.apiProfiles.ActiveConfig()
 }
 
 func (h *Handlers) storysDir() string {
@@ -308,30 +324,216 @@ func (h *Handlers) PutAPIConfig(w http.ResponseWriter, r *http.Request) {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
+	normalizeAPIConfig(&newCfg, r)
 
-	if newCfg.HTTPTimeoutSeconds <= 0 {
-		newCfg.HTTPTimeoutSeconds = config.DefaultHTTPTimeoutSeconds
+	active := h.apiProfiles.Active
+	if h.apiProfiles.Profiles[active] == nil {
+		h.apiProfiles.Profiles[active] = &config.APIConfig{}
 	}
-	if newCfg.ContextBudgetTokens <= 0 {
-		if window := llm.FetchModelContextWindow(&newCfg); window > 0 {
-			newCfg.ContextBudgetTokens = window
-		} else {
-			newCfg.ContextBudgetTokens = config.DefaultContextBudgetTokens
-		}
-	}
-
-	data, err := json.MarshalIndent(newCfg, "", "  ")
-	if err != nil {
-		h.writeErrorReq(w, r, http.StatusInternalServerError, "serialize_api_config_failed", err.Error())
-		return
-	}
-	if err := fsutil.WriteFileAtomic(h.apiCfgPath, data); err != nil {
+	*h.apiProfiles.Profiles[active] = newCfg
+	if err := h.saveAPIProfiles(); err != nil {
 		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_api_config_failed", err.Error())
 		return
 	}
-
-	h.apiCfg = &newCfg
+	h.refreshActiveAPI()
 	h.writeJSON(w, http.StatusOK, h.apiCfg)
+}
+
+// normalizeAPIConfig fills sensible defaults for a user-submitted APIConfig.
+func normalizeAPIConfig(cfg *config.APIConfig, r *http.Request) {
+	if cfg.HTTPTimeoutSeconds <= 0 {
+		cfg.HTTPTimeoutSeconds = config.DefaultHTTPTimeoutSeconds
+	}
+	if cfg.ContextBudgetTokens <= 0 {
+		if window := llm.FetchModelContextWindow(cfg); window > 0 {
+			cfg.ContextBudgetTokens = window
+		} else {
+			cfg.ContextBudgetTokens = config.DefaultContextBudgetTokens
+		}
+	}
+}
+
+// GetAPIProfiles lists all saved API profiles plus the active name.
+func (h *Handlers) GetAPIProfiles(w http.ResponseWriter, r *http.Request) {
+	profiles := make([]map[string]interface{}, 0, len(h.apiProfiles.Profiles))
+	for name, cfg := range h.apiProfiles.Profiles {
+		profiles = append(profiles, map[string]interface{}{"name": name, "config": cfg})
+	}
+	sort.Slice(profiles, func(i, j int) bool {
+		return profiles[i]["name"].(string) < profiles[j]["name"].(string)
+	})
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"active":   h.apiProfiles.Active,
+		"profiles": profiles,
+	})
+}
+
+// PostAPIProfile creates a new named API profile.
+func (h *Handlers) PostAPIProfile(w http.ResponseWriter, r *http.Request) {
+	if h.rejectIfTaskRunning(w, r) {
+		return
+	}
+	var req struct {
+		Name   string            `json:"name"`
+		Config *config.APIConfig `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "missing_profile_name")
+		return
+	}
+	if _, exists := h.apiProfiles.Profiles[name]; exists {
+		h.writeErrorReq(w, r, http.StatusConflict, "api_profile_exists")
+		return
+	}
+	cfg := req.Config
+	if cfg == nil {
+		cfg = config.DefaultAPIConfig()
+	}
+	normalizeAPIConfig(cfg, r)
+	h.apiProfiles.Profiles[name] = cfg
+	if err := h.saveAPIProfiles(); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_api_config_failed", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, cfg)
+}
+
+// PutAPIProfile updates an existing named API profile.
+func (h *Handlers) PutAPIProfile(w http.ResponseWriter, r *http.Request) {
+	if h.rejectIfTaskRunning(w, r) {
+		return
+	}
+	name := r.PathValue("name")
+	cfg, ok := h.apiProfiles.Profiles[name]
+	if !ok {
+		h.writeErrorReq(w, r, http.StatusNotFound, "api_profile_not_found")
+		return
+	}
+	var newCfg config.APIConfig
+	if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	normalizeAPIConfig(&newCfg, r)
+	*cfg = newCfg
+	if name == h.apiProfiles.Active {
+		h.refreshActiveAPI()
+	}
+	if err := h.saveAPIProfiles(); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_api_config_failed", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, cfg)
+}
+
+// DeleteAPIProfile removes a named profile. Deleting the active profile
+// activates another one (default → first remaining).
+func (h *Handlers) DeleteAPIProfile(w http.ResponseWriter, r *http.Request) {
+	if h.rejectIfTaskRunning(w, r) {
+		return
+	}
+	name := r.PathValue("name")
+	if _, ok := h.apiProfiles.Profiles[name]; !ok {
+		h.writeErrorReq(w, r, http.StatusNotFound, "api_profile_not_found")
+		return
+	}
+	delete(h.apiProfiles.Profiles, name)
+	if len(h.apiProfiles.Profiles) == 0 {
+		h.apiProfiles.Profiles["default"] = config.DefaultAPIConfig()
+	}
+	h.apiProfiles.Normalize()
+	h.refreshActiveAPI()
+	if err := h.saveAPIProfiles(); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_api_config_failed", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, map[string]string{"active": h.apiProfiles.Active})
+}
+
+// PostAPIProfileSelect switches the active API profile.
+func (h *Handlers) PostAPIProfileSelect(w http.ResponseWriter, r *http.Request) {
+	if h.rejectIfTaskRunning(w, r) {
+		return
+	}
+	name := r.PathValue("name")
+	if _, ok := h.apiProfiles.Profiles[name]; !ok {
+		h.writeErrorReq(w, r, http.StatusNotFound, "api_profile_not_found")
+		return
+	}
+	h.apiProfiles.Active = name
+	h.refreshActiveAPI()
+	if err := h.saveAPIProfiles(); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_api_config_failed", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, map[string]string{"active": h.apiProfiles.Active})
+}
+
+// GetAPIModels lists models for the active profile (or the ?profile= name one).
+func (h *Handlers) GetAPIModels(w http.ResponseWriter, r *http.Request) {
+	var cfg *config.APIConfig
+	if name := r.URL.Query().Get("profile"); name != "" {
+		c, ok := h.apiProfiles.Profiles[name]
+		if !ok {
+			h.writeErrorReq(w, r, http.StatusNotFound, "api_profile_not_found")
+			return
+		}
+		cfg = c
+	} else {
+		cfg = h.apiProfiles.ActiveConfig()
+	}
+	h.fetchModelsFor(w, r, cfg)
+}
+
+// PostAPIModels lists models for an inline config (or a saved profile).
+// Body: {profile?: "name"} or {config: {…}}; empty body uses the active profile.
+func (h *Handlers) PostAPIModels(w http.ResponseWriter, r *http.Request) {
+	var cfg *config.APIConfig
+	if r.ContentLength != 0 {
+		var req struct {
+			Profile string            `json:"profile"`
+			Config  *config.APIConfig `json:"config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+			return
+		}
+		if req.Profile != "" {
+			c, ok := h.apiProfiles.Profiles[req.Profile]
+			if !ok {
+				h.writeErrorReq(w, r, http.StatusNotFound, "api_profile_not_found")
+				return
+			}
+			cfg = c
+		} else if req.Config != nil {
+			cfg = req.Config
+		}
+	}
+	if cfg == nil {
+		cfg = h.apiProfiles.ActiveConfig()
+	}
+	h.fetchModelsFor(w, r, cfg)
+}
+
+func (h *Handlers) fetchModelsFor(w http.ResponseWriter, r *http.Request, cfg *config.APIConfig) {
+	if cfg == nil || strings.TrimSpace(cfg.BaseURL) == "" {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_api_config", "API Base URL 未配置")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	models, err := llm.FetchModels(ctx, cfg)
+	if err != nil {
+		h.writeErrorReq(w, r, http.StatusBadGateway, "api_models_fetch_failed", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{"models": models})
 }
 
 func (h *Handlers) PostAPITest(w http.ResponseWriter, r *http.Request) {

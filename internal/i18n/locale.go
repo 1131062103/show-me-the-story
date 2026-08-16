@@ -87,6 +87,10 @@ var errorCatalog = map[string]map[string]string{
 		LangZH: "无效的JSON: %s",
 		LangEN: "Invalid JSON: %s",
 	},
+	"invalid_api_config": {
+		LangZH: "API配置无效: %s",
+		LangEN: "Invalid API config: %s",
+	},
 	"missing_feedback": {
 		LangZH: "缺少 feedback 字段",
 		LangEN: "feedback field is required",
@@ -250,6 +254,22 @@ var errorCatalog = map[string]map[string]string{
 	"api_test_success": {
 		LangZH: "连接成功",
 		LangEN: "Connection succeeded",
+	},
+	"missing_profile_name": {
+		LangZH: "请填写配置名称",
+		LangEN: "Profile name is required",
+	},
+	"api_profile_exists": {
+		LangZH: "同名 API 配置已存在",
+		LangEN: "An API profile with this name already exists",
+	},
+	"api_profile_not_found": {
+		LangZH: "API 配置不存在",
+		LangEN: "API profile not found",
+	},
+	"api_models_fetch_failed": {
+		LangZH: "拉取模型列表失败: %s",
+		LangEN: "Failed to fetch model list: %s",
 	},
 	"character_name_empty": {
 		LangZH: "角色名不能为空",

@@ -23,8 +23,8 @@ import (
 
 // StartWebServer wires all routes and blocks serving HTTP. staticFiles must
 // be rooted at the built frontend (index.html at its top level).
-func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.LogBroadcaster, port, progDir, version string, staticFiles fs.FS) {
-	h := NewHandlers(apiCfg, apiCfgPath, logger, progDir, version)
+func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *sse.LogBroadcaster, port, progDir, version string, staticFiles fs.FS) {
+	h := NewHandlers(apiProfiles, apiCfgPath, logger, progDir, version)
 
 	mux := http.NewServeMux()
 
@@ -42,6 +42,13 @@ func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.Log
 	mux.HandleFunc("GET /api/config/api", h.GetAPIConfig)
 	mux.HandleFunc("PUT /api/config/api", h.PutAPIConfig)
 	mux.HandleFunc("POST /api/config/api/test", h.PostAPITest)
+	mux.HandleFunc("GET /api/config/api/profiles", h.GetAPIProfiles)
+	mux.HandleFunc("POST /api/config/api/profiles", h.PostAPIProfile)
+	mux.HandleFunc("PUT /api/config/api/profiles/{name}", h.PutAPIProfile)
+	mux.HandleFunc("DELETE /api/config/api/profiles/{name}", h.DeleteAPIProfile)
+	mux.HandleFunc("POST /api/config/api/profiles/{name}/select", h.PostAPIProfileSelect)
+	mux.HandleFunc("GET /api/config/api/models", h.GetAPIModels)
+	mux.HandleFunc("POST /api/config/api/models", h.PostAPIModels)
 
 	// Project-scoped endpoints (require project selection)
 	mux.HandleFunc("GET /api/config", h.GetConfig)

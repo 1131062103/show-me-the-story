@@ -154,6 +154,62 @@ func ValidateConfig(apiCfg *config.APIConfig) error {
 	return nil
 }
 
+// FetchModels 从 OpenAI 兼容 API 的 /models 端点拉取可用模型 ID 列表，
+// 供前端下拉选择（不需要用户手填）。请求失败时返回 error。
+func FetchModels(ctx context.Context, apiCfg *config.APIConfig) ([]string, error) {
+	if apiCfg == nil || strings.TrimSpace(apiCfg.BaseURL) == "" {
+		return nil, fmt.Errorf("API Base URL 未配置")
+	}
+	modelsURL := resolveAPIBase(apiCfg.BaseURL, apiCfg.URLStrict) + "/models"
+
+	req, err := http.NewRequestWithContext(ctx, "GET", modelsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if apiCfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiCfg.APIKey)
+	}
+
+	timeout := time.Duration(apiCfg.HTTPTimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API 响应错误，状态码: %d, 返回内容: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	models := make([]string, 0, len(result.Data))
+	seen := make(map[string]bool)
+	for _, m := range result.Data {
+		id := strings.TrimSpace(m.ID)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			models = append(models, id)
+		}
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("接口未返回模型列表")
+	}
+	return models, nil
+}
+
 func IsFatalAPIError(err error) bool {
 	if err == nil {
 		return false

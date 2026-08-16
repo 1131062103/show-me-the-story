@@ -8,6 +8,7 @@
   import TaskTokenBadge from './components/TaskTokenBadge.svelte';
   import Projects from './pages/Projects.svelte';
   import Config from './pages/Config.svelte';
+  import SystemConfig from './pages/SystemConfig.svelte';
   import Outline from './pages/Outline.svelte';
   import Writing from './pages/Writing.svelte';
   import Relations from './pages/Relations.svelte';
@@ -29,7 +30,8 @@
   let mobileChatOpen = false;
 
   const navItems = [
-    ['config', '⚙️', 'nav.config'],
+    ['config', '📖', 'nav.config'],
+    ['system', '⚙️', 'nav.system'],
     ['outline', '📝', 'nav.outline'],
     ['writing', '✍️', 'nav.writing'],
     ['foreshadows', '🔗', 'nav.foreshadows'],
@@ -204,6 +206,8 @@
       <main class="flex-1 min-w-0 overflow-y-auto p-3 sm:p-4 md:border-r border-base-content/10">
         {#if $currentPage === 'config'}
           <Config {sendToChat} />
+        {:else if $currentPage === 'system'}
+          <SystemConfig />
         {:else if $currentPage === 'outline'}
           <Outline {sendToChat} />
         {:else if $currentPage === 'writing'}

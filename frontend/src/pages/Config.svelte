@@ -1,9 +1,8 @@
 <script>
   import { onMount } from 'svelte';
   import { api } from '../lib/api.js';
-  import { apiConfig, config, progress, settings, editingCharID, editingWvID, wvFilter, addToast, showConfirm, taskRunning, apiTestResult } from '../lib/stores.js';
+  import { config, progress, settings, editingCharID, editingWvID, wvFilter, addToast, showConfirm, taskRunning } from '../lib/stores.js';
   import { t } from '../lib/i18n/index.js';
-  import { resolveChatCompletionsURL } from '../lib/apiUrl.js';
   import ConfigChangePanel from '../components/ConfigChangePanel.svelte';
   import ActSelector from '../components/ActSelector.svelte';
 
@@ -55,31 +54,10 @@
     return acts.map(g => actLabelByGid[g] || ('幕 ' + g)).join(', ');
   }
 
-  $: cfgBase = $apiConfig?.base_url || '';
-  $: cfgModel = $apiConfig?.model || '';
-  $: cfgKey = $apiConfig?.api_key || '';
-  $: cfgTimeout = $apiConfig?.http_timeout_seconds || 600;
-
-  let localApiCfg = { base_url: '', url_strict: false, model: '', api_key: '', http_timeout_seconds: 600, max_tokens: 32768, context_budget_tokens: 900000 };
   let localStoryCfg = { type: '', title: '', chapter_count: 30, target_words_per_chapter: 2500, writing_style: '', writing_pov: '', story_synopsis: '' };
-  let testingApi = false;
 
-  $: resolvedChatURL = resolveChatCompletionsURL(localApiCfg.base_url, !!localApiCfg.url_strict);
-
-  let apiCfgSnapshot = '';
   let storyCfgSnapshot = '';
 
-  $: if ($apiConfig) {
-    const snap = JSON.stringify($apiConfig);
-    if (snap !== apiCfgSnapshot) {
-      localApiCfg = {
-        base_url: '', url_strict: false, model: '', api_key: '', http_timeout_seconds: 600, max_tokens: 32768, context_budget_tokens: 900000,
-        ...$apiConfig,
-        url_strict: !!$apiConfig.url_strict,
-      };
-      apiCfgSnapshot = snap;
-    }
-  }
   $: if ($config?.story) {
     const snap = JSON.stringify($config.story);
     if (snap !== storyCfgSnapshot) {
@@ -130,37 +108,9 @@
   ];
 
   onMount(async () => {
-    try { apiConfig.set(await api('GET', '/api/config/api')); } catch (e) {}
     try { config.set(await api('GET', '/api/config')); } catch (e) {}
     try { settings.set(await api('GET', '/api/settings')); } catch (e) {}
   });
-
-  async function saveAPIConfig() {
-    try {
-      await api('PUT', '/api/config/api', localApiCfg);
-      apiConfig.set({ ...localApiCfg });
-      addToast($t('config.api.saved'), 'success');
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  // 影响连接测试的字段签名；配置改动后据此自动清除持久化的测试结果
-  const apiTestSig = c => JSON.stringify([c.base_url, !!c.url_strict, c.model, c.api_key, c.http_timeout_seconds, c.max_tokens]);
-  $: if ($apiTestResult && apiTestSig(localApiCfg) !== $apiTestResult.sig) apiTestResult.set(null);
-
-  async function testAPIConfig() {
-    testingApi = true;
-    const sig = apiTestSig(localApiCfg);
-    try {
-      const res = await api('POST', '/api/config/api/test', localApiCfg);
-      apiTestResult.set({ ok: true, model: res.model, sig });
-      addToast($t('config.api.testOk', { model: res.model }), 'success');
-    } catch (e) {
-      apiTestResult.set({ ok: false, error: e.message, sig });
-      addToast(e.message, 'error');
-    } finally {
-      testingApi = false;
-    }
-  }
 
   // 直接保存故事配置（不经过 AI），存在已确认章节且关键设定有变化时提示协调
   async function saveStoryConfig() {
@@ -407,98 +357,35 @@
 
 <div class="space-y-3">
   <ConfigChangePanel />
-  <!-- API + Story Config: side by side on md+ -->
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-    <div class="card bg-base-200 shadow-sm">
-      <div class="card-body p-4 gap-2">
-        <h3 class="card-title text-base">{$t('config.api.title')}</h3>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
-          <div class="col-span-2">
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.baseUrl')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.openai.com/v1" disabled={$taskRunning || testingApi} />
-            <label class="label cursor-pointer justify-start gap-2 py-1 px-0 min-h-0">
-              <input type="checkbox" class="toggle toggle-xs" bind:checked={localApiCfg.url_strict} disabled={$taskRunning || testingApi} />
-              <span class="label-text text-xs text-base-content/60">{$t('config.api.urlStrict')}</span>
-            </label>
-            <p class="text-xs text-base-content/45 mb-1">{$t('config.api.urlStrictHint')}</p>
-            {#if resolvedChatURL}
-              <p class="text-xs text-base-content/50 break-all">
-                {$t('config.api.resolvedUrl')}: <code class="font-mono text-primary/80">{resolvedChatURL}</code>
-              </p>
-            {/if}
-          </div>
-          <div>
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.model')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi} />
-          </div>
-          <div>
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.timeout')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.http_timeout_seconds} disabled={$taskRunning || testingApi} />
-          </div>
-          <div>
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.maxTokens')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.max_tokens} placeholder="{$t('config.api.maxTokens.placeholder')}" disabled={$taskRunning || testingApi} title={$t('config.api.maxTokens.tooltip')} />
-          </div>
-          <div class="col-span-2">
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.budget')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.context_budget_tokens} placeholder="900000" disabled={$taskRunning || testingApi} title={$t('config.api.budget.tooltip')} />
-          </div>
-          <div class="col-span-2">
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.key')}</span>
-            <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi} />
-          </div>
+  <!-- 故事设定：基础信息 -->
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body p-4 gap-2">
+      <h3 class="card-title text-base">{$t('config.story.title')}</h3>
+      {#if hasAccepted}
+        <div class="alert alert-warning text-xs py-1.5 px-3">
+          <span>{$t('config.story.acceptedHint')}</span>
         </div>
-        {#if $apiTestResult}
-          <div class="text-xs rounded-md border px-2.5 py-1.5 {$apiTestResult.ok ? 'border-success/40 bg-success/10 text-success' : 'border-error/40 bg-error/10 text-error'}">
-            {#if $apiTestResult.ok}
-              ✓ {$t('config.api.testResultOk', { model: $apiTestResult.model })}
-            {:else}
-              ✕ {$t('config.api.testResultFail', { error: $apiTestResult.error })}
-            {/if}
-          </div>
-        {/if}
-        <div class="flex justify-end gap-2">
-          <button class="btn btn-xs {$apiTestResult ? ($apiTestResult.ok ? 'btn-success btn-outline' : 'btn-error btn-outline') : 'btn-outline'}" on:click={testAPIConfig} disabled={$taskRunning || testingApi}>
-            {#if testingApi}
-              <span class="loading loading-spinner loading-xs"></span>{$t('config.api.testing')}
-            {:else}
-              {$t('config.api.test')}
-            {/if}
-          </button>
-          <button class="btn btn-primary btn-xs" on:click={saveAPIConfig} disabled={$taskRunning || testingApi}>{$t('common.save')}</button>
+      {/if}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
+        <div>
+          <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.type')}</span>
+          <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.type} placeholder={$t('config.story.type.placeholder')} disabled={$taskRunning} />
+        </div>
+        <div>
+          <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.titleField')}</span>
+          <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.title} placeholder={$t('config.story.title.placeholder')} disabled={$taskRunning} />
+        </div>
+        <div>
+          <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.chapterCount')}</span>
+          <input type="number" class="input input-sm w-full" bind:value={localStoryCfg.chapter_count} disabled={$taskRunning} />
+        </div>
+        <div>
+          <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.targetWords')}</span>
+          <input type="number" class="input input-sm w-full" bind:value={localStoryCfg.target_words_per_chapter} disabled={$taskRunning} />
         </div>
       </div>
-    </div>
-
-    <div class="card bg-base-200 shadow-sm">
-      <div class="card-body p-4 gap-2">
-        <h3 class="card-title text-base">{$t('config.story.title')}</h3>
-        {#if hasAccepted}
-          <div class="alert alert-warning text-xs py-1.5 px-3">
-            <span>{$t('config.story.acceptedHint')}</span>
-          </div>
-        {/if}
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
-          <div>
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.type')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.type} placeholder={$t('config.story.type.placeholder')} disabled={$taskRunning} />
-          </div>
-          <div>
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.titleField')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.title} placeholder={$t('config.story.title.placeholder')} disabled={$taskRunning} />
-          </div>
-          <div>
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.chapterCount')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localStoryCfg.chapter_count} disabled={$taskRunning} />
-          </div>
-          <div>
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.targetWords')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localStoryCfg.target_words_per_chapter} disabled={$taskRunning} />
-          </div>
-        </div>
-        <div class="flex justify-end">
-          <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
-        </div>
+      <div class="flex justify-end">
+        <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
       </div>
     </div>
   </div>

@@ -1,6 +1,8 @@
 import { writable, get } from 'svelte/store';
 
 export const apiConfig = writable(null);
+// { active, profiles: [{name, config}] } — multiple saved API configs.
+export const apiProfiles = writable(null);
 export const config = writable(null);
 export const progress = writable(null);
 export const settings = writable(null);

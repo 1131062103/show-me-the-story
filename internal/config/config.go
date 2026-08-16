@@ -78,6 +78,78 @@ type PromptsConfig struct {
 	ImportChapterAnalysis         string `json:"import_chapter_analysis"`
 }
 
+// APIProfiles holds multiple named API configurations plus the name of the
+// currently active profile. Persisted in api.json under progDir.
+type APIProfiles struct {
+	Profiles map[string]*APIConfig `json:"profiles"`
+	Active   string                `json:"active"`
+}
+
+// NewAPIProfiles returns a fresh store with a single "default" profile.
+func NewAPIProfiles() *APIProfiles {
+	return &APIProfiles{
+		Profiles: map[string]*APIConfig{"default": DefaultAPIConfig()},
+		Active:   "default",
+	}
+}
+
+// Normalize repairs an APIProfiles store: fills missing defaults, ensures
+// non-nil profiles and a valid active name (default → first available).
+func (p *APIProfiles) Normalize() {
+	if p == nil {
+		return
+	}
+	if len(p.Profiles) == 0 {
+		p.Profiles = map[string]*APIConfig{"default": DefaultAPIConfig()}
+	}
+	for name, cfg := range p.Profiles {
+		if cfg == nil {
+			delete(p.Profiles, name)
+			continue
+		}
+		normalizeAPIConfig(cfg)
+	}
+	if p.Active == "" {
+		p.Active = "default"
+	}
+	if _, ok := p.Profiles[p.Active]; !ok {
+		if _, ok := p.Profiles["default"]; ok {
+			p.Active = "default"
+		} else {
+			for name := range p.Profiles {
+				p.Active = name
+				break
+			}
+		}
+	}
+}
+
+// ActiveConfig returns the currently active profile, falling back to the first
+// available profile or a fresh default when nothing is usable.
+func (p *APIProfiles) ActiveConfig() *APIConfig {
+	if p == nil {
+		return DefaultAPIConfig()
+	}
+	if cfg, ok := p.Profiles[p.Active]; ok && cfg != nil {
+		return cfg
+	}
+	for _, cfg := range p.Profiles {
+		if cfg != nil {
+			return cfg
+		}
+	}
+	return DefaultAPIConfig()
+}
+
+func normalizeAPIConfig(cfg *APIConfig) {
+	if cfg.HTTPTimeoutSeconds <= 0 {
+		cfg.HTTPTimeoutSeconds = DefaultHTTPTimeoutSeconds
+	}
+	if cfg.ContextBudgetTokens <= 0 {
+		cfg.ContextBudgetTokens = DefaultContextBudgetTokens
+	}
+}
+
 // DefaultContextBudgetTokens is the fallback context budget when the model's
 // real context window cannot be fetched.
 const DefaultContextBudgetTokens = 300000
@@ -151,6 +223,59 @@ func LoadAPIConfig(path string) (*APIConfig, error) {
 
 func saveAPIConfig(path string, cfg *APIConfig) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return fsutil.WriteFileAtomic(path, data)
+}
+
+// LoadAPIProfiles loads the api.json store. Legacy files holding a single
+// APIConfig are transparently migrated to a "default" profile and written back.
+func LoadAPIProfiles(path string) (*APIProfiles, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			p := NewAPIProfiles()
+			if saveErr := SaveAPIProfiles(path, p); saveErr != nil {
+				return nil, fmt.Errorf("创建默认API配置失败: %w", saveErr)
+			}
+			return p, nil
+		}
+		return nil, fmt.Errorf("读取API配置文件失败: %w", err)
+	}
+
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("解析API配置文件失败: %w", err)
+	}
+
+	// Legacy single-config layout (no "profiles" key): migrate it.
+	if _, isProfiles := probe["profiles"]; !isProfiles {
+		var single APIConfig
+		if err := json.Unmarshal(data, &single); err != nil {
+			return nil, fmt.Errorf("解析API配置文件失败: %w", err)
+		}
+		normalizeAPIConfig(&single)
+		p := NewAPIProfiles()
+		p.Profiles["default"] = &single
+		p.Active = "default"
+		if saveErr := SaveAPIProfiles(path, p); saveErr != nil {
+			return nil, fmt.Errorf("迁移API配置文件失败: %w", saveErr)
+		}
+		return p, nil
+	}
+
+	var p APIProfiles
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("解析API配置文件失败: %w", err)
+	}
+	p.Normalize()
+	return &p, nil
+}
+
+// SaveAPIProfiles atomically writes the whole profile store to api.json.
+func SaveAPIProfiles(path string, p *APIProfiles) error {
+	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return err
 	}

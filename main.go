@@ -52,11 +52,12 @@ func main() {
 
 	// Load API config (global, shared across projects; always in progDir)
 	apiCfgPath := filepath.Join(progDir, "api.json")
-	apiCfg, err := config.LoadAPIConfig(apiCfgPath)
+	apiProfiles, err := config.LoadAPIProfiles(apiCfgPath)
 	if err != nil {
 		fmt.Printf(" [错误] 加载API配置失败: %v\n", err)
 		os.Exit(1)
 	}
+	apiCfg := apiProfiles.ActiveConfig()
 	llm.EnsureContextBudget(apiCfg)
 
 	if apiCfg.BaseURL == "" || apiCfg.Model == "" {
@@ -88,5 +89,5 @@ func main() {
 		log.Fatalf("嵌入静态文件失败: %v", err)
 	}
 
-	httpapi.StartWebServer(apiCfg, apiCfgPath, logger, port, progDir, version, staticFS)
+	httpapi.StartWebServer(apiProfiles, apiCfgPath, logger, port, progDir, version, staticFS)
 }
