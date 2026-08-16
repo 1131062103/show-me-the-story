@@ -733,6 +733,174 @@ Requirements:
 3. Compress side plots to a sentence; drop details with no narrative continuity value
 4. Output the summary text only, nothing else`,
 
+	ActSummary: `You are a precise narrative analyst. Below are the chapter summaries of one completed act. Compress them into a single act-level summary that later acts will use as prior context for outlining and writing.
+
+[Title] {{.Title}}
+[Arc {{.ArcIndex}}] "{{.ArcTitle}}"
+[Act narrative outline] {{.ActOutline}}
+[Act stage goal] {{.ActGoal}}
+
+[Chapter summaries]
+{{.ChapterSummaries}}
+
+Requirements:
+1. 200-450 words, chronological through-line: act opening state -> key event chain -> act end state
+2. Must preserve: one-time events (first meetings, identity reveals, relationship milestones, major deaths), changes in the protagonist's power/status/understanding, and unresolved hooks or foreshadowing left at act end
+3. Compress side plots to a sentence; drop details with no narrative continuity value
+4. Output the summary text only, nothing else`,
+
+	BookOverview: `You are a senior development editor who specializes in structuring very long novels. Based on the author's creative direction and base settings, generate the "book overview" for the whole book: the master storyline plus the volume-level skeleton. This layer is only a loose whole-book overview; acts and chapters are refined level by level in the next steps.
+
+[Creative direction]
+{{.CorePrompt}}
+[Genre] {{.StoryType}}
+[Synopsis] {{.StorySynopsis}}
+[Writing style] {{.WritingStyle}}
+[Narrative POV] {{.WritingPOV}}
+[Planned total chapters] {{.ChapterCount}} chapters (~{{.TargetWords}} words each)
+
+[Registered characters]
+{{.CharacterList}}
+
+Design requirements:
+1. book_overview: the book's master storyline and overall structure (250-500 words) - the protagonist's growth line, the core conflict spanning the whole book, and the escalation logic between volumes (power/status/scope upgrades, shifting and escalating conflicts)
+2. Volume skeleton: split the book into volumes, each a relatively self-contained story stage; the chapter_count values must sum exactly to {{.ChapterCount}}; the number of volumes scales with book length (longer books get more volumes); per-volume chapter counts may be uneven (e.g. several volumes at 200 chapters and a final volume at 30)
+3. Each volume's goal field: 80-200 words, concrete about the starting state, core conflicts, end state and the end-of-volume hook
+4. Volumes escalate progressively along a clear main-line logic
+
+Return JSON:
+{
+  "title": "book title",
+  "story_synopsis": "story synopsis (keep the original meaning if already provided; may polish)",
+  "book_overview": "master storyline and overall structure",
+  "arcs": [
+    {"title": "volume title", "goal": "stage goal and main line", "chapter_count": 200}
+  ]
+}
+Return strictly JSON, no extra text.`,
+
+	ArcOutline: `You are a professional story-development editor. The book's "book overview" is confirmed. Generate the "volume outline" for one volume: its detailed storyline plus the act breakdown. This layer has medium constraints; it only goes down to the act level. Chapters are generated in the next step.
+
+[Title] {{.Title}}
+[Genre] {{.StoryType}}
+[Core writing prompt] {{.CorePrompt}}
+[Synopsis] {{.StorySynopsis}}
+[Writing style] {{.WritingStyle}}
+[Narrative POV] {{.WritingPOV}}
+
+[Book overview]
+{{.BookOverview}}
+
+[Previous context (progress of earlier volumes/chapters)]
+{{.PreviousContext}}
+
+[This volume] Volume {{.ArcIndex}} "{{.ArcTitle}}" (chapters {{.StartNum}}-{{.EndNum}}, {{.ChapterCount}} chapters total)
+[Volume stage goal] {{.ArcGoal}}
+
+[Later volumes (this volume must NOT pre-consume their key events)]
+{{.FutureArcs}}
+
+[Registered characters]
+{{.CharacterList}}
+
+[Author requirements]
+{{.UserRequirements}}
+
+Design requirements:
+1. outline: this volume's detailed storyline (250-500 words) - key event chain, main conflicts, character arcs, end state and hook
+2. acts: split this volume into about {{.ActsPerArc}} acts (suggest 3-5), about {{.ChaptersPerAct}} chapters each; the chapter_count values must sum exactly to this volume's chapter count (chapters {{.StartNum}}-{{.EndNum}})
+3. Each act needs a clear goal (60-150 words): starting state, core conflict, end state
+4. Acts escalate; each act ends with a hook; this volume must not pre-consume key events assigned to later volumes
+
+Return JSON:
+{
+  "outline": "this volume's detailed storyline",
+  "acts": [
+    {"title": "act title", "goal": "act goal", "chapter_count": 40}
+  ]
+}
+Return strictly JSON, no extra text.`,
+
+	ActOutline: `You are a professional story-development editor. A volume's "volume outline" is confirmed. Generate the "act outline" for one act: its narrative outline. This layer has strong constraints; chapters are generated in the next step.
+
+[Title] {{.Title}}
+[Writing style] {{.WritingStyle}}
+[Narrative POV] {{.WritingPOV}}
+
+[Volume] Volume {{.ArcIndex}} "{{.ArcTitle}}"
+[Volume storyline]
+{{.ArcOutline}}
+
+[Previous context (progress of earlier acts/chapters)]
+{{.PreviousContext}}
+
+[This act] Act {{.ActIndex}} "{{.ActTitle}}" (chapters {{.StartNum}}-{{.EndNum}}, {{.ChapterCount}} chapters total)
+[Act goal] {{.ActGoal}}
+
+[Later acts (this act must NOT pre-consume their key events)]
+{{.FutureActs}}
+
+[Registered characters]
+{{.CharacterList}}
+
+Design requirements:
+1. outline: this act's narrative outline (300-600 words), strong constraints - a chronological walk-through of the act's key scenes, conflict escalation, turning points, character entrances and roles, and the end-of-act hook
+2. In-act rhythm: carry over from the previous act -> conflict build-up -> climax -> end-of-act hook
+3. This act must not pre-stage one-time events assigned to later acts (first meetings, identity reveals, etc.); one-time events that already happened in earlier context must not be repeated
+4. Output only the act outline text, nothing else
+
+Return JSON:
+{
+  "outline": "this act's narrative outline"
+}
+Return strictly JSON, no extra text.`,
+
+	ActChapterOutline: `You are a professional story-development editor. An act's "act outline" is confirmed. Generate the "chapter outlines" for all chapters in this act. Chapter outlines impose very strong constraints on chapters; prose will be written strictly chapter by chapter.
+
+[Title] {{.Title}}
+[Writing style] {{.WritingStyle}}
+[Narrative POV] {{.WritingPOV}}
+
+[Volume] Volume {{.ArcIndex}} "{{.ArcTitle}}"
+[Volume storyline]
+{{.ArcOutline}}
+[Act] Act {{.ActIndex}} "{{.ActTitle}}"
+[Act narrative outline]
+{{.ActOutline}}
+
+[Previous context (progress of earlier chapters/acts)]
+{{.PreviousContext}}
+
+[This act's chapter range] chapters {{.StartNum}}-{{.EndNum}}, {{.NewChapterCount}} chapters total
+
+[Registered characters]
+{{.CharacterList}}
+
+Generate outlines for this act's {{.NewChapterCount}} chapters, from chapter {{.StartNum}} to {{.EndNum}}.
+
+Return JSON:
+{
+  "chapters": [
+    {
+      "num": {{.StartNum}},
+      "title": "chapter title",
+      "outline": "chapter outline",
+      "characters": [
+        {"name": "character proper name"},
+        {"name": "new character", "first_appearance": true, "note": "role description"}
+      ]
+    },
+    ...
+  ]
+}
+
+Notes:
+1. Each chapter's outline field must be {{.OutlineMinWords}}-{{.OutlineMaxWords}} words, including: opening scene, core conflict, key turning point, characters and their roles, and the chapter-end direction or hook
+2. Chapter outlines must strictly follow this act's outline; chapters escalate through the act, and the last chapter lands on the act-end hook
+3. Every chapter must fill characters (proper names only; name must not contain titles/verbs; new characters get first_appearance=true and a note)
+4. Prefer [Registered characters]; one-time events that already happened (first meetings, identity reveals) must not be repeated; key events assigned to later acts/volumes must not happen early
+5. Return strictly JSON, no extra text`,
+
 	ImportMetaAnalysis: `You are a professional fiction editor. The user is importing a published novel. Below are an opening excerpt and the chapter title list. Analyze them and extract the work's metadata.
 
 [Opening excerpt]

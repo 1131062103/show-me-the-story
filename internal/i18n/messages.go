@@ -578,6 +578,46 @@ var messageCatalog = map[string]map[string]string{
 		LangZH: "保存进度失败：%v",
 		LangEN: "Failed to save progress: %v",
 	},
+	"log.book_overview_generating": {
+		LangZH: "正在生成整书概览与卷级骨架...",
+		LangEN: "Generating book overview and arc skeleton...",
+	},
+	"log.book_overview_done": {
+		LangZH: "整书概览生成完成：共 %d 卷 / %d 章，请确认后继续",
+		LangEN: "Book overview generated: %d arcs / %d chapters. Confirm to continue",
+	},
+	"log.arc_plan_generating": {
+		LangZH: "正在生成第 %d 卷卷纲（含幕拆分）...",
+		LangEN: "Generating arc %d outline (with act breakdown)...",
+	},
+	"log.arc_plan_done": {
+		LangZH: "第 %d 卷卷纲生成完成：%d 幕，请确认后生成幕纲",
+		LangEN: "Arc %d outline generated: %d acts. Confirm to generate act outlines",
+	},
+	"log.act_outline_generating": {
+		LangZH: "正在生成第 %d 卷第 %d 幕幕纲...",
+		LangEN: "Generating outline for arc %d act %d...",
+	},
+	"log.act_outline_done": {
+		LangZH: "第 %d 卷第 %d 幕幕纲生成完成，请确认后生成章纲",
+		LangEN: "Arc %d act %d outline generated. Confirm to generate chapter outlines",
+	},
+	"log.act_chapters_generating": {
+		LangZH: "正在生成第 %d 卷第 %d 幕章纲...",
+		LangEN: "Generating chapter outlines for arc %d act %d...",
+	},
+	"log.act_chapters_done": {
+		LangZH: "第 %d 卷第 %d 幕章纲生成完成（%d 章），请确认后开始写作",
+		LangEN: "Arc %d act %d chapter outlines generated (%d chapters). Confirm to start writing",
+	},
+	"log.act_summary_generating": {
+		LangZH: "正在生成第 %d 卷第 %d 幕的幕摘要...",
+		LangEN: "Generating summary for arc %d act %d...",
+	},
+	"log.act_summary_done": {
+		LangZH: "第 %d 卷第 %d 幕幕摘要已生成，可进入下一幕",
+		LangEN: "Arc %d act %d summary generated; you can move on to the next act",
+	},
 	"log.import_split_done": {
 		LangZH: "本地切章完成：共 %d 章，开始逐章分析",
 		LangEN: "Local split done: %d chapters, starting per-chapter analysis",

@@ -133,6 +133,21 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 		return fmt.Errorf("第 %d 章已确认，请确认当前章节或重置进度", ch.Num)
 	}
 
+	// v4 幕闸：章纲未确认的幕，禁止生成正文。
+	if len(state.Arcs) > 0 && state.BookOverview != "" {
+		if act := actForChapterNum(state, ch.Num); act != nil && !act.ChaptersConfirmed {
+			return fmt.Errorf("第 %d 章属于尚未确认章纲的幕《%s》（第%d~%d章），请先在大纲页确认该幕的章纲", ch.Num, act.Title, act.StartCh, act.EndCh)
+		}
+	}
+
+	// v4 幕摘要闸：进入新幕（第 2 幕起）前，前一幕已完结但尚无幕摘要时暂停，
+	// 由用户在大纲页确认生成幕摘要后再继续，保证跨幕前情衔接。
+	if len(state.Arcs) > 0 && state.BookOverview != "" {
+		if prev := actBeforeChapterNum(state, ch.Num); prev != nil && actCompleted(state, prev) && prev.Summary == "" {
+			return fmt.Errorf("第 %d 章将进入新幕，前一幕《%s》（第%d~%d章）已完结但尚无幕摘要，请先在大纲页生成并确认该幕的幕摘要", ch.Num, prev.Title, prev.StartCh, prev.EndCh)
+		}
+	}
+
 	ch.Status = StatusWriting
 	if err := SaveProgress(progressPath, state); err != nil {
 		return err
@@ -543,8 +558,9 @@ func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig,
 
 	foreshadowContext := formatActiveForeshadowsForChapterLang(state.Foreshadows, ch.Num, lang)
 
-	characterContext := buildCharacterContextForLang(settings, ch, lang)
-	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang)
+	actID := actIDForChapter(state, ch.Num)
+	characterContext := buildCharacterContextForLang(settings, ch, lang, actID)
+	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang, actID)
 	outlineConstraints := buildOutlineConstraintsForLang(state, idx, lang)
 	memoryContext := buildMemoryForLang(state, idx, lang)
 
@@ -827,8 +843,9 @@ func reviseChapterSegment(ctx context.Context, apiCfg *config.APIConfig, cfg *co
 	}
 
 	historySummary := buildHistorySummaryForLang(state, chapterIdx, lang)
-	characterContext := buildCharacterContextForLang(settings, ch, lang)
-	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang)
+	actID := actIDForChapter(state, ch.Num)
+	characterContext := buildCharacterContextForLang(settings, ch, lang, actID)
+	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang, actID)
 
 	userPrompt := config.RenderPrompt(cfg.Prompts.ChapterSegmentRevision, map[string]string{
 		"ChapterNum":       fmt.Sprintf("%d", ch.Num),
@@ -889,8 +906,9 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 	lang := cfg.Language
 
 	historySummary := buildHistorySummaryForLang(state, chapterIdx, lang)
-	characterContext := buildCharacterContextForLang(settings, ch, lang)
-	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang)
+	actID := actIDForChapter(state, ch.Num)
+	characterContext := buildCharacterContextForLang(settings, ch, lang, actID)
+	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang, actID)
 
 	userPrompt := config.RenderPrompt(cfg.Prompts.ChapterRevision, map[string]string{
 		"ChapterNum":       fmt.Sprintf("%d", ch.Num),

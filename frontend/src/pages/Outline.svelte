@@ -17,6 +17,8 @@
   $: displaySynopsis = $config?.story?.story_synopsis || p?.story_synopsis || '';
   $: chapters = p?.chapters || [];
   $: arcs = p?.arcs || [];
+  $: bookOverview = p?.book_overview || '';
+  $: bookOverviewConfirmed = !!p?.book_overview_confirmed;
   $: hasOutline = chapters.length > 0 || arcs.length > 0;
   $: hasAccepted = chapters.some(c => c.status === 'accepted');
   $: inOutlinePhase = p?.phase === 'outline';
@@ -163,6 +165,136 @@
     } catch (e) { addToast(e.message, 'error'); }
   }
 
+  // 整书概览（书 → 卷 → 幕 → 章 四级大纲流程）
+  async function generateBookOverview() {
+    try {
+      await api('POST', '/api/book-overview/generate');
+      addToast($t('outline.toasts.bookOverviewStarted'), 'info');
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  async function confirmBookOverview() {
+    showConfirm($t('outline.toasts.bookOverviewConfirmAsk'), async () => {
+      try {
+        await api('POST', '/api/book-overview/confirm');
+        progress.set(await api('GET', '/api/progress'));
+        addToast($t('outline.toasts.bookOverviewConfirmed'), 'success');
+      } catch (e) { addToast(e.message, 'error'); }
+    });
+  }
+
+  async function confirmArcOutline(arc) {
+    showConfirm($t('outline.toasts.arcPlanConfirmAsk'), async () => {
+      try {
+        await api('POST', `/api/arcs/${arc.id}/outline-confirm`);
+        progress.set(await api('GET', '/api/progress'));
+        addToast($t('outline.toasts.arcPlanConfirmed'), 'success');
+      } catch (e) { addToast(e.message, 'error'); }
+    });
+  }
+
+  async function generateActOutline(arc, act) {
+    try {
+      await api('POST', `/api/arcs/${arc.id}/acts/${act.id}/outline`);
+      addToast($t('outline.toasts.actOutlineStarted'), 'info');
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  async function confirmActOutline(arc, act) {
+    showConfirm($t('outline.toasts.actOutlineConfirmAsk'), async () => {
+      try {
+        await api('POST', `/api/arcs/${arc.id}/acts/${act.id}/outline-confirm`);
+        progress.set(await api('GET', '/api/progress'));
+        addToast($t('outline.toasts.actOutlineConfirmed'), 'success');
+      } catch (e) { addToast(e.message, 'error'); }
+    });
+  }
+
+  async function generateActChapters(arc, act) {
+    try {
+      await api('POST', `/api/arcs/${arc.id}/acts/${act.id}/chapters`);
+      addToast($t('outline.toasts.actChaptersStarted'), 'info');
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  async function confirmActChapters(arc, act) {
+    showConfirm($t('outline.toasts.actChaptersConfirmAsk'), async () => {
+      try {
+        await api('POST', `/api/arcs/${arc.id}/acts/${act.id}/chapters-confirm`);
+        progress.set(await api('GET', '/api/progress'));
+        addToast($t('outline.toasts.actChaptersConfirmed'), 'success');
+      } catch (e) { addToast(e.message, 'error'); }
+    });
+  }
+
+  // 卷 / 幕 修缮编辑（整书概览 / 卷纲 确认前）
+  let editArcId = -1;
+  let editArcTitle = '';
+  let editArcGoal = '';
+  let editArcCount = 0;
+
+  function startEditArc(arc) {
+    editArcId = arc.id;
+    editArcTitle = arc.title || '';
+    editArcGoal = arc.goal || '';
+    editArcCount = arc.end_ch - arc.start_ch + 1;
+  }
+
+  async function saveEditArc(arc) {
+    try {
+      await api('PUT', `/api/arcs/${arc.id}`, {
+        title: editArcTitle.trim(),
+        goal: editArcGoal.trim(),
+        chapter_count: Number(editArcCount) || 0,
+      });
+      progress.set(await api('GET', '/api/progress'));
+      addToast($t('outline.toasts.arcEdited'), 'success');
+      editArcId = -1;
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  let editActKey = '';
+  let editActTitle = '';
+  let editActGoal = '';
+  let editActCount = 0;
+
+  function startEditAct(act) {
+    editActKey = act.id;
+    editActTitle = act.title || '';
+    editActGoal = act.goal || '';
+    editActCount = act.end_ch - act.start_ch + 1;
+  }
+
+  async function saveEditAct(arc, act) {
+    try {
+      await api('PUT', `/api/arcs/${arc.id}/acts/${act.id}`, {
+        title: editActTitle.trim(),
+        goal: editActGoal.trim(),
+        chapter_count: Number(editActCount) || 0,
+      });
+      progress.set(await api('GET', '/api/progress'));
+      addToast($t('outline.toasts.actEdited'), 'success');
+      editActKey = '';
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  function actChapterCounts(arc, act) {
+    const inRange = chapters.filter(c => c.num >= act.start_ch && c.num <= act.end_ch);
+    return { outlined: inRange.length, total: act.end_ch - act.start_ch + 1 };
+  }
+
+  function actComplete(arc, act) {
+    const inRange = chapters.filter(c => c.num >= act.start_ch && c.num <= act.end_ch);
+    return inRange.length > 0 && inRange.every(c => c.status === 'accepted');
+  }
+
+  async function generateActSummary(arc, act) {
+    try {
+      await api('POST', `/api/arcs/${arc.id}/acts/${act.id}/summary`);
+      addToast($t('outline.toasts.actSummaryStarted'), 'info');
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
   async function appendArc() {
     try {
       await api('POST', '/api/arcs/append', {
@@ -300,11 +432,12 @@
       <p class="text-base mb-1">{$t('outline.empty.title')}</p>
       <p class="text-sm text-base-content/35 mb-6">{$t('outline.empty.hint')}</p>
       <div class="flex justify-center gap-2">
-        <button class="btn btn-primary btn-sm" on:click={generateOutline} disabled={$taskRunning}>{$t('outline.btn.generate')}</button>
+        <button class="btn btn-primary btn-sm" on:click={generateBookOverview} disabled={$taskRunning}>{$t('outline.btn.bookOverview')}</button>
+        <button class="btn btn-ghost btn-sm" on:click={generateOutline} disabled={$taskRunning}>{$t('outline.btn.generate')}</button>
         <button class="btn btn-secondary btn-sm" on:click={generateSkeleton} disabled={$taskRunning}>{$t('outline.btn.skeleton')}</button>
         <button class="btn btn-ghost btn-sm" on:click={() => showImport = !showImport} disabled={$taskRunning}>{$t('outline.btn.import')}</button>
       </div>
-      <p class="text-xs text-base-content/35 mt-2">{$t('outline.empty.arcHint')}</p>
+      <p class="text-xs text-base-content/35 mt-2">{$t('outline.empty.overviewHint')}</p>
     </div>
 
     {#if showImport}
@@ -383,7 +516,7 @@
       <div class="card-body p-4 gap-2">
         <div class="flex items-center gap-2 flex-wrap">
           <h3 class="text-base font-semibold flex-1 min-w-0 truncate">📖 {displayTitle || $t('common.untitled')}</h3>
-          {#if inOutlinePhase}
+          {#if inOutlinePhase && !bookOverview}
             <button class="btn btn-success btn-xs" on:click={confirmOutline} disabled={$taskRunning || chapters.length === 0}>{$t('outline.btn.confirm')}</button>
           {/if}
           <button class="btn btn-ghost btn-xs" on:click={() => showRevise = !showRevise} disabled={$taskRunning}>{$t('outline.btn.revise')}</button>
@@ -428,7 +561,27 @@
       </div>
     </div>
 
-    <!-- 卷结构（层级大纲） -->
+    <!-- 整书概览（书级大纲，确认后解锁卷纲） -->
+    {#if bookOverview}
+      <div class="card bg-base-200 shadow-sm border border-primary/20">
+        <div class="card-body p-4 gap-2">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-semibold text-base-content/60">{$t('outline.bookOverview.title')}
+              {#if bookOverviewConfirmed}
+                <span class="badge badge-xs badge-success ml-1">{$t('outline.bookOverview.confirmed')}</span>
+              {/if}
+            </h4>
+            <button class="btn btn-success btn-xs" on:click={confirmBookOverview} disabled={$taskRunning || bookOverviewConfirmed}>{$t('outline.bookOverview.confirm')}</button>
+          </div>
+          <div class="bg-base-300 rounded p-2.5 text-sm max-h-40 overflow-y-auto">{bookOverview}</div>
+          {#if !bookOverviewConfirmed}
+            <p class="text-xs text-base-content/45">{$t('outline.bookOverview.unlockedHint')}</p>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
+    <!-- 卷结构（层级大纲：卷纲 → 幕纲 → 章纲） -->
     {#if arcs.length > 0}
       <div class="card bg-base-200 shadow-sm">
         <div class="card-body p-4 gap-2">
@@ -455,24 +608,129 @@
             {#each arcs as arc, i (arc.id)}
               {@const counts = arcChapterCounts(arc)}
               <div class="bg-base-300 rounded-lg p-2.5">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span class="text-sm font-bold text-base-content/40 shrink-0">{$t('outline.arcs.volLabel', { n: i + 1 })}</span>
                   <span class="text-sm font-medium flex-1 min-w-0 truncate">{arc.title}</span>
                   <span class="text-xs text-base-content/40 shrink-0">{$t('outline.arcs.range', { start: arc.start_ch, end: arc.end_ch })}</span>
-                  <span class="badge badge-xs {counts.outlined >= counts.total ? 'badge-success' : 'badge-ghost'}">{$t('outline.arcs.outlined', { n: counts.outlined, total: counts.total })}</span>
-                  {#if arc.summary}
-                    <span class="badge badge-xs badge-info">{$t('outline.arcs.summaryDone')}</span>
+                  {#if arc.confirmed}
+                    <span class="badge badge-xs badge-success">{$t('outline.arcs.planDone')}</span>
                   {/if}
-                  <button class="btn btn-primary btn-xs shrink-0" on:click={() => generateArcOutline(arc)} disabled={$taskRunning}>
-                    {counts.outlined > 0 ? $t('outline.arcs.regenOutline') : $t('outline.arcs.genOutline')}
-                  </button>
-                  <button class="btn btn-ghost btn-xs shrink-0" on:click={() => { arcReqOpenId = arcReqOpenId === arc.id ? -1 : arc.id; arcRequirements = ''; }} disabled={$taskRunning}>+</button>
+                  {#if bookOverview}
+                    <button class="btn btn-primary btn-xs shrink-0" on:click={() => generateArcOutline(arc)} disabled={$taskRunning || !bookOverviewConfirmed}>
+                      {arc.acts?.length ? $t('outline.arcs.regenPlan') : $t('outline.arcs.genPlan')}
+                    </button>
+                    <button class="btn btn-success btn-xs shrink-0" on:click={() => confirmArcOutline(arc)} disabled={$taskRunning || arc.confirmed || !arc.acts?.length}>
+                      {$t('outline.arcs.planConfirm')}
+                    </button>
+                    {#if !arc.confirmed}
+                      <button class="btn btn-ghost btn-xs shrink-0" on:click={() => editArcId === arc.id ? editArcId = -1 : startEditArc(arc)} disabled={$taskRunning}>{$t('outline.arcs.edit')}</button>
+                    {/if}
+                  {:else}
+                    <span class="badge badge-xs {counts.outlined >= counts.total ? 'badge-success' : 'badge-ghost'}">{$t('outline.arcs.outlined', { n: counts.outlined, total: counts.total })}</span>
+                    {#if arc.summary}
+                      <span class="badge badge-xs badge-info">{$t('outline.arcs.summaryDone')}</span>
+                    {/if}
+                    <button class="btn btn-primary btn-xs shrink-0" on:click={() => generateArcOutline(arc)} disabled={$taskRunning}>
+                      {counts.outlined > 0 ? $t('outline.arcs.regenOutline') : $t('outline.arcs.genOutline')}
+                    </button>
+                    <button class="btn btn-ghost btn-xs shrink-0" on:click={() => { arcReqOpenId = arcReqOpenId === arc.id ? -1 : arc.id; arcRequirements = ''; }} disabled={$taskRunning}>+</button>
+                  {/if}
                 </div>
-                {#if arc.goal}
+
+                {#if editArcId === arc.id && !arc.confirmed}
+                  <div class="bg-base-100/60 rounded p-2.5 space-y-2 mt-2">
+                    <div class="flex gap-2">
+                      <input type="text" class="input input-sm flex-1" bind:value={editArcTitle} placeholder={$t('outline.arcs.editTitle')} />
+                      <input type="number" min="1" max="500" class="input input-sm w-20" bind:value={editArcCount} title={$t('outline.arcs.editCount')} />
+                    </div>
+                    <textarea class="textarea textarea-sm w-full h-16 text-sm" bind:value={editArcGoal} placeholder={$t('outline.arcs.editGoal')}></textarea>
+                    <div class="flex justify-end gap-2">
+                      <button class="btn btn-ghost btn-xs" on:click={() => editArcId = -1}>{$t('common.cancel')}</button>
+                      <button class="btn btn-primary btn-xs" on:click={() => saveEditArc(arc)}>{$t('common.save')}</button>
+                    </div>
+                  </div>
+                {:else if arc.outline}
+                  <div class="bg-base-100/40 rounded p-2 text-xs text-base-content/70 mt-1.5 max-h-28 overflow-y-auto">{arc.outline}</div>
+                {:else if arc.goal}
                   <p class="text-xs text-base-content/50 mt-1 line-clamp-2">{arc.goal}</p>
                 {/if}
+
                 {#if arcReqOpenId === arc.id}
                   <textarea class="textarea textarea-sm w-full h-14 text-sm mt-2" bind:value={arcRequirements} placeholder={$t('outline.arcs.reqPlaceholder')} disabled={$taskRunning}></textarea>
+                {/if}
+
+                <!-- 幕（act）层级 -->
+                {#if bookOverview && arc.acts?.length}
+                  <div class="mt-2 space-y-1.5">
+                    {#each arc.acts as act, j (act.id)}
+                      {@const actCounts = actChapterCounts(arc, act)}
+                      <div class="bg-base-200/70 rounded-lg p-2.5">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="text-xs font-bold text-base-content/45 shrink-0">{$t('outline.acts.label', { a: j + 1 })}</span>
+                          <span class="text-sm font-medium flex-1 min-w-0 truncate">{act.title}</span>
+                          <span class="text-xs text-base-content/40 shrink-0">{$t('outline.arcs.range', { start: act.start_ch, end: act.end_ch })}</span>
+                          {#if act.confirmed}
+                            <span class="badge badge-xs badge-info">{$t('outline.acts.outlineDone')}</span>
+                          {/if}
+                          {#if act.chapters_confirmed}
+                            <span class="badge badge-xs badge-success">{$t('outline.acts.chaptersDone')}</span>
+                          {/if}
+                          {#if !act.confirmed}
+                            <button class="btn btn-primary btn-xs shrink-0" on:click={() => generateActOutline(arc, act)} disabled={$taskRunning || !arc.confirmed}>
+                              {act.outline ? $t('outline.acts.regenOutline') : $t('outline.acts.genOutline')}
+                            </button>
+                            <button class="btn btn-success btn-xs shrink-0" on:click={() => confirmActOutline(arc, act)} disabled={$taskRunning || !act.outline}>{$t('outline.acts.confirm')}</button>
+                            <button class="btn btn-ghost btn-xs shrink-0" on:click={() => editActKey === act.id ? editActKey = '' : startEditAct(act)} disabled={$taskRunning}>{$t('outline.acts.edit')}</button>
+                          {/if}
+                          {#if act.confirmed && !act.chapters_confirmed}
+                            <button class="btn btn-primary btn-xs shrink-0" on:click={() => generateActChapters(arc, act)} disabled={$taskRunning}>
+                              {actCounts.outlined > 0 ? $t('outline.acts.regenChapters') : $t('outline.acts.genChapters')}
+                            </button>
+                            <button class="btn btn-success btn-xs shrink-0" on:click={() => confirmActChapters(arc, act)} disabled={$taskRunning || actCounts.outlined === 0}>
+                              {$t('outline.acts.confirmChapters')}
+                            </button>
+                          {/if}
+                        </div>
+
+                        {#if editActKey === act.id && !act.confirmed}
+                          <div class="bg-base-100/60 rounded p-2.5 space-y-2 mt-2">
+                            <div class="flex gap-2">
+                              <input type="text" class="input input-sm flex-1" bind:value={editActTitle} placeholder={$t('outline.acts.editTitle')} />
+                              <input type="number" min="1" max="100" class="input input-sm w-20" bind:value={editActCount} title={$t('outline.acts.editCount')} />
+                            </div>
+                            <textarea class="textarea textarea-sm w-full h-14 text-sm" bind:value={editActGoal} placeholder={$t('outline.acts.editGoal')}></textarea>
+                            <div class="flex justify-end gap-2">
+                              <button class="btn btn-ghost btn-xs" on:click={() => editActKey = ''}>{$t('common.cancel')}</button>
+                              <button class="btn btn-primary btn-xs" on:click={() => saveEditAct(arc, act)}>{$t('common.save')}</button>
+                            </div>
+                          </div>
+                        {:else if act.outline}
+                          <div class="bg-base-100/40 rounded p-2 text-xs text-base-content/70 mt-1.5 max-h-24 overflow-y-auto">{act.outline}</div>
+                        {:else if act.goal}
+                          <p class="text-xs text-base-content/50 mt-1 line-clamp-2">{act.goal}</p>
+                        {/if}
+
+                        {#if act.confirmed && !act.chapters_confirmed}
+                          <div class="flex items-center gap-2 mt-1.5">
+                            <span class="text-xs text-base-content/45">{$t('outline.acts.progress', { n: actCounts.outlined, total: actCounts.total })}</span>
+                            <div class="progress progress-primary h-1 flex-1 max-w-40" value={actCounts.outlined} max={actCounts.total}></div>
+                          </div>
+                        {/if}
+
+                        {#if act.summary}
+                          <div class="mt-2">
+                            <span class="text-xs text-base-content/50 mb-1 block">{$t('outline.acts.summaryLabel')}</span>
+                            <div class="bg-base-100/40 rounded p-2 text-xs text-base-content/70 max-h-24 overflow-y-auto">{act.summary}</div>
+                          </div>
+                        {:else if actComplete(arc, act)}
+                          <div class="flex items-center gap-2 mt-2">
+                            <span class="text-xs text-base-content/45">{$t('outline.acts.summaryPending')}</span>
+                            <button class="btn btn-warning btn-xs" on:click={() => generateActSummary(arc, act)} disabled={$taskRunning}>{$t('outline.acts.genSummary')}</button>
+                          </div>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
                 {/if}
               </div>
             {/each}

@@ -37,6 +37,12 @@ type StoryConfig struct {
 	WritingStyle          string `json:"writing_style"`
 	WritingPOV            string `json:"writing_pov"` // 叙述视角，如第一人称女主、第三人称限知等
 	StorySynopsis         string `json:"story_synopsis"`
+	// ChaptersPerAct is the target chapter count per act (幕) in the v4
+	// book → arc → act → chapter hierarchy. Default 40.
+	ChaptersPerAct int `json:"chapters_per_act,omitempty"`
+	// ActsPerArc is the target act count per volume (卷) hint used by the
+	// arc outline (卷纲) generation. Default 4, prompt suggests 3~5.
+	ActsPerArc int `json:"acts_per_arc,omitempty"`
 }
 
 type PromptsConfig struct {
@@ -63,6 +69,11 @@ type PromptsConfig struct {
 	ArcSkeleton                   string `json:"arc_skeleton"`
 	ArcChapterOutline             string `json:"arc_chapter_outline"`
 	ArcSummary                    string `json:"arc_summary"`
+	BookOverview                  string `json:"book_overview"`
+	ArcOutline                    string `json:"arc_outline"`
+	ActOutline                    string `json:"act_outline"`
+	ActChapterOutline             string `json:"act_chapter_outline"`
+	ActSummary                    string `json:"act_summary"`
 	ImportMetaAnalysis            string `json:"import_meta_analysis"`
 	ImportChapterAnalysis         string `json:"import_chapter_analysis"`
 }
@@ -100,6 +111,8 @@ func DefaultConfigForLang(lang string) *Config {
 		Story: StoryConfig{
 			ChapterCount:          12,
 			TargetWordsPerChapter: 5000,
+			ChaptersPerAct:        40,
+			ActsPerArc:            4,
 		},
 		SkillConfig: &SkillConfig{
 			EnabledSkills: make(map[string]bool),
@@ -167,6 +180,12 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Story.TargetWordsPerChapter <= 0 {
 		cfg.Story.TargetWordsPerChapter = 5000
+	}
+	if cfg.Story.ChaptersPerAct <= 0 {
+		cfg.Story.ChaptersPerAct = 40
+	}
+	if cfg.Story.ActsPerArc <= 0 {
+		cfg.Story.ActsPerArc = 4
 	}
 
 	cfg.Language = i18n.NormalizeLanguage(cfg.Language)
@@ -281,6 +300,21 @@ func (p *PromptsConfig) ApplyDefaults(lang string) {
 	}
 	if p.ArcSummary == "" {
 		p.ArcSummary = defaults.ArcSummary
+	}
+	if p.BookOverview == "" {
+		p.BookOverview = defaults.BookOverview
+	}
+	if p.ArcOutline == "" {
+		p.ArcOutline = defaults.ArcOutline
+	}
+	if p.ActOutline == "" {
+		p.ActOutline = defaults.ActOutline
+	}
+	if p.ActChapterOutline == "" {
+		p.ActChapterOutline = defaults.ActChapterOutline
+	}
+	if p.ActSummary == "" {
+		p.ActSummary = defaults.ActSummary
 	}
 	if p.ImportMetaAnalysis == "" {
 		p.ImportMetaAnalysis = defaults.ImportMetaAnalysis

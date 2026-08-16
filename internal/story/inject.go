@@ -134,7 +134,7 @@ func buildHistorySummaryForLang(state *Progress, idx int, lang string) string {
 }
 
 // buildCharacterContextForLang returns structured character details injected into writing prompts.
-func buildCharacterContextForLang(settings *ProjectSettings, ch ChapterState, lang string) string {
+func buildCharacterContextForLang(settings *ProjectSettings, ch ChapterState, lang string, actID int) string {
 	var sb strings.Builder
 	chapterOutline := ch.Outline
 
@@ -143,15 +143,22 @@ func buildCharacterContextForLang(settings *ProjectSettings, ch ChapterState, la
 		for _, c := range normalizeOutlineCharacters(ch.Characters) {
 			castNames[c.Name] = true
 		}
-		var relevant []Character
+		var actScoped []Character
 		for _, c := range settings.Characters {
+			if actID > 0 && len(c.Acts) > 0 && !containsInt(c.Acts, actID) {
+				continue
+			}
+			actScoped = append(actScoped, c)
+		}
+		var relevant []Character
+		for _, c := range actScoped {
 			name := StripNameMarks(c.Name)
 			if strings.Contains(chapterOutline, name) || castNames[name] {
 				relevant = append(relevant, c)
 			}
 		}
 		if len(relevant) == 0 {
-			relevant = settings.Characters
+			relevant = actScoped
 		}
 
 		en := i18n.NormalizeLanguage(lang) == i18n.LangEN
@@ -196,7 +203,7 @@ func buildCharacterContextForLang(settings *ProjectSettings, ch ChapterState, la
 	return sb.String()
 }
 
-func buildWorldviewContextForLang(settings *ProjectSettings, chapterOutline, lang string) string {
+func buildWorldviewContextForLang(settings *ProjectSettings, chapterOutline, lang string, actID int) string {
 	if settings == nil {
 		return ""
 	}
@@ -205,14 +212,21 @@ func buildWorldviewContextForLang(settings *ProjectSettings, chapterOutline, lan
 	var sb strings.Builder
 
 	if len(settings.Worldview) > 0 {
-		var relevant []WorldviewEntry
+		var actScoped []WorldviewEntry
 		for _, w := range settings.Worldview {
+			if actID > 0 && len(w.Acts) > 0 && !containsInt(w.Acts, actID) {
+				continue
+			}
+			actScoped = append(actScoped, w)
+		}
+		var relevant []WorldviewEntry
+		for _, w := range actScoped {
 			if strings.Contains(chapterOutline, w.Name) || strings.Contains(chapterOutline, w.Category) {
 				relevant = append(relevant, w)
 			}
 		}
 		if len(relevant) == 0 {
-			relevant = settings.Worldview
+			relevant = actScoped
 		}
 		for _, w := range relevant {
 			sb.WriteString(fmt.Sprintf("【%s】(%s)\n  %s\n\n", w.Name, w.Category, w.Description))
@@ -220,14 +234,21 @@ func buildWorldviewContextForLang(settings *ProjectSettings, chapterOutline, lan
 	}
 
 	if len(settings.Organizations) > 0 {
-		var relevantOrgs []Organization
+		var actScopedOrgs []Organization
 		for _, o := range settings.Organizations {
+			if actID > 0 && len(o.Acts) > 0 && !containsInt(o.Acts, actID) {
+				continue
+			}
+			actScopedOrgs = append(actScopedOrgs, o)
+		}
+		var relevantOrgs []Organization
+		for _, o := range actScopedOrgs {
 			if strings.Contains(chapterOutline, o.Name) {
 				relevantOrgs = append(relevantOrgs, o)
 			}
 		}
 		if len(relevantOrgs) == 0 {
-			relevantOrgs = settings.Organizations
+			relevantOrgs = actScopedOrgs
 		}
 		for _, o := range relevantOrgs {
 			if en {

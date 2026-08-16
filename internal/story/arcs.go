@@ -28,6 +28,147 @@ func ArcIndexByID(state *Progress, id int) int {
 	return -1
 }
 
+// ActIndexByID returns the index of an act inside its arc, or -1.
+func ActIndexByID(arc *Arc, id int) int {
+	for i := range arc.Acts {
+		if arc.Acts[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// actIDForChapter returns the book-wide act index (1-based, flattened across
+// all arcs) of the act containing the given chapter number, or 0 when the book
+// has no act layer (legacy projects). Used to scope settings
+// (characters/worldview/organizations) to their owning acts. The flattened
+// index is used because act IDs are only unique within their own arc.
+func actIDForChapter(state *Progress, num int) int {
+	if len(state.Arcs) == 0 || state.BookOverview == "" {
+		return 0
+	}
+	act := actForChapterNum(state, num)
+	if act == nil {
+		return 0
+	}
+	idx := 1
+	for i := range state.Arcs {
+		for j := range state.Arcs[i].Acts {
+			if &state.Arcs[i].Acts[j] == act {
+				return idx
+			}
+			idx++
+		}
+	}
+	return 0
+}
+
+// containsInt reports whether s contains v.
+func containsInt(s []int, v int) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// actForChapterNum returns the act containing the given chapter number, or nil
+// when the book has no act layer (legacy v3 projects) or the chapter is outside
+// every act range.
+func actForChapterNum(state *Progress, num int) *Act {
+	arc := arcForChapterNum(state, num)
+	if arc == nil {
+		return nil
+	}
+	for i := range arc.Acts {
+		if num >= arc.Acts[i].StartCh && num <= arc.Acts[i].EndCh {
+			return &arc.Acts[i]
+		}
+	}
+	return nil
+}
+
+// actBeforeChapterNum returns the act immediately preceding the act that
+// contains num, or nil when num falls in the first act of the book or the
+// project has no act layer. Used by the act-summary gate before entering a
+// new act. Crosses arc boundaries: the first act of a later arc follows the
+// last act of the previous arc.
+func actBeforeChapterNum(state *Progress, num int) *Act {
+	arc := arcForChapterNum(state, num)
+	if arc == nil || len(arc.Acts) == 0 {
+		return nil
+	}
+	for i := range arc.Acts {
+		if num >= arc.Acts[i].StartCh && num <= arc.Acts[i].EndCh {
+			if i > 0 {
+				return &arc.Acts[i-1]
+			}
+			ai := ArcIndexByID(state, arc.ID)
+			if ai > 0 && len(state.Arcs[ai-1].Acts) > 0 {
+				prevActs := state.Arcs[ai-1].Acts
+				return &prevActs[len(prevActs)-1]
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// actChapters returns the chapters of state that fall inside the act range.
+func actChapters(state *Progress, act *Act) []*ChapterState {
+	var out []*ChapterState
+	for i := range state.Chapters {
+		if state.Chapters[i].Num >= act.StartCh && state.Chapters[i].Num <= act.EndCh {
+			out = append(out, &state.Chapters[i])
+		}
+	}
+	return out
+}
+
+// actCompleted reports whether every chapter in the act range is accepted.
+func actCompleted(state *Progress, act *Act) bool {
+	chs := actChapters(state, act)
+	if len(chs) != act.EndCh-act.StartCh+1 {
+		return false
+	}
+	for _, ch := range chs {
+		if ch.Status != StatusAccepted {
+			return false
+		}
+	}
+	return true
+}
+
+// assignRanges converts per-unit chapter counts into [start,end] ranges
+// starting at startCh, forcing the total to equal totalChapters (the last unit
+// absorbs any drift; zero/negative counts get a minimum of 1).
+func assignRanges(counts []int, startCh, totalChapters int) []struct{ Start, End int } {
+	out := make([]struct{ Start, End int }, len(counts))
+	if len(counts) == 0 {
+		return out
+	}
+	sum := 0
+	for i, c := range counts {
+		if c < 1 {
+			counts[i] = 1
+			c = 1
+		}
+		sum += c
+	}
+	drift := totalChapters - sum
+	counts[len(counts)-1] += drift
+	if counts[len(counts)-1] < 1 {
+		counts[len(counts)-1] = 1
+	}
+	cur := startCh
+	for i, c := range counts {
+		out[i] = struct{ Start, End int }{cur, cur + c - 1}
+		cur += c
+	}
+	return out
+}
+
 // arcForChapterNum returns the arc containing the given chapter number.
 func arcForChapterNum(state *Progress, num int) *Arc {
 	for i := range state.Arcs {
@@ -151,31 +292,9 @@ type arcSkeletonResponse struct {
 // starting at startCh, forcing the total to equal totalChapters (the last arc
 // absorbs any drift; zero/negative counts get a minimum of 1).
 func assignArcRanges(counts []int, startCh, totalChapters int) [](struct{ Start, End int }) {
-	out := make([]struct{ Start, End int }, len(counts))
-	if len(counts) == 0 {
-		return out
-	}
-	sum := 0
-	for i, c := range counts {
-		if c < 1 {
-			counts[i] = 1
-			c = 1
-		}
-		sum += c
-	}
 	// ponytail: proportional rebalance would be fancier; clamping the last arc
 	// is enough because the prompt demands exact totals and drift is rare.
-	drift := totalChapters - sum
-	counts[len(counts)-1] += drift
-	if counts[len(counts)-1] < 1 {
-		counts[len(counts)-1] = 1
-	}
-	cur := startCh
-	for i, c := range counts {
-		out[i] = struct{ Start, End int }{cur, cur + c - 1}
-		cur += c
-	}
-	return out
+	return assignRanges(counts, startCh, totalChapters)
 }
 
 // GenerateArcSkeletonAction generates the volume-level skeleton. Refuses when

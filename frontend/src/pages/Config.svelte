@@ -5,6 +5,7 @@
   import { t } from '../lib/i18n/index.js';
   import { resolveChatCompletionsURL } from '../lib/apiUrl.js';
   import ConfigChangePanel from '../components/ConfigChangePanel.svelte';
+  import ActSelector from '../components/ActSelector.svelte';
 
   export let sendToChat = async () => {};
 
@@ -18,18 +19,41 @@
   let wvCollapse = false;
 
   let charName = '', charAge = '', charAppearance = '', charPersonality = '', charBackground = '', charMotivation = '', charAbilities = '', charNotes = '';
+  let charActs = [];
   let wvName = '', wvCategory = 'other', wvDescription = '', wvTags = '';
+  let wvActs = [];
 
   // 组织管理
   let showOrgForm = false, orgCollapse = false;
   let orgName = '', orgType = '', orgDescription = '';
   let orgMembers = [];
+  let orgActs = [];
   let editingOrgID = null;
 
   // 关系管理
   let showRelForm = false, relCollapse = false;
   let relSource = '', relTarget = '', relLabel = '';
   let editingRelID = null;
+
+  // 幕归属选项：按全书扁平顺序给出全局幕编号（供设定按幕生效）
+  $: actOptions = (() => {
+    const out = [];
+    const arcs = $progress?.arcs || [];
+    arcs.forEach((arc, i) => {
+      (arc.acts || []).forEach((act, j) => {
+        out.push({ gid: out.length + 1, label: `${i + 1}-${j + 1}${act.title ? ' ' + act.title : ''}` });
+      });
+    });
+    return out;
+  })();
+
+  $: hasActs = actOptions.length > 0;
+
+  $: actLabelByGid = Object.fromEntries(actOptions.map(o => [o.gid, o.label]));
+  function actsLabel(acts) {
+    if (!acts?.length) return '';
+    return acts.map(g => actLabelByGid[g] || ('幕 ' + g)).join(', ');
+  }
 
   $: cfgBase = $apiConfig?.base_url || '';
   $: cfgModel = $apiConfig?.model || '';
@@ -180,9 +204,11 @@
       charMotivation = char.motivation || '';
       charAbilities = char.abilities || '';
       charNotes = char.notes || '';
+      charActs = [...(char.acts || [])];
     } else {
       $editingCharID = null;
       charName = charAge = charAppearance = charPersonality = charBackground = charMotivation = charAbilities = charNotes = '';
+      charActs = [];
     }
   }
 
@@ -193,7 +219,7 @@
 
   async function saveCharacter() {
     if (!charName.trim()) { addToast($t('config.char.nameRequired'), 'error'); return; }
-    const data = { name: charName.trim(), age: charAge, appearance: charAppearance, personality: charPersonality, background: charBackground, motivation: charMotivation, abilities: charAbilities, notes: charNotes };
+    const data = { name: charName.trim(), age: charAge, appearance: charAppearance, personality: charPersonality, background: charBackground, motivation: charMotivation, abilities: charAbilities, notes: charNotes, acts: charActs };
     try {
       if ($editingCharID) {
         await api('PUT', '/api/characters/' + $editingCharID, data);
@@ -231,9 +257,11 @@
       wvCategory = item.category || 'other';
       wvDescription = item.description || '';
       wvTags = item.tags || '';
+      wvActs = [...(item.acts || [])];
     } else {
       $editingWvID = null;
       wvName = ''; wvCategory = 'other'; wvDescription = ''; wvTags = '';
+      wvActs = [];
     }
   }
 
@@ -244,7 +272,7 @@
 
   async function saveWorldview() {
     if (!wvName.trim() || !wvDescription.trim()) { addToast($t('config.wv.requiredFields'), 'error'); return; }
-    const data = { name: wvName.trim(), category: wvCategory, description: wvDescription.trim(), tags: wvTags };
+    const data = { name: wvName.trim(), category: wvCategory, description: wvDescription.trim(), tags: wvTags, acts: wvActs };
     try {
       if ($editingWvID) {
         await api('PUT', '/api/worldview/' + $editingWvID, data);
@@ -283,10 +311,12 @@
       orgType = org.type || '';
       orgDescription = org.description || '';
       orgMembers = [...(org.members || [])];
+      orgActs = [...(org.acts || [])];
     } else {
       editingOrgID = null;
       orgName = orgType = orgDescription = '';
       orgMembers = [];
+      orgActs = [];
     }
   }
 
@@ -297,7 +327,7 @@
 
   async function saveOrganization() {
     if (!orgName.trim()) { addToast($t('config.org.nameRequired'), 'error'); return; }
-    const data = { name: orgName.trim(), type: orgType, description: orgDescription, members: orgMembers };
+    const data = { name: orgName.trim(), type: orgType, description: orgDescription, members: orgMembers, acts: orgActs };
     try {
       if (editingOrgID) {
         await api('PUT', '/api/organizations/' + editingOrgID, data);
@@ -522,6 +552,9 @@
                 <div class="flex-1 min-w-0">
                   <div class="text-sm font-medium truncate">{stripNameMarks(c.name)}</div>
                   <div class="text-xs text-base-content/40 line-clamp-1">{c.personality || c.background || c.age || ''}</div>
+                  {#if (c.acts || []).length}
+                    <div class="text-[11px] text-primary/70 mt-0.5 truncate">{$t('config.acts.on')}: {actsLabel(c.acts)}</div>
+                  {/if}
                 </div>
                 <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                   <button class="btn btn-ghost btn-xs px-1" on:click={() => openCharForm(c)} disabled={$taskRunning}>{$t('common.edit')}</button>
@@ -570,6 +603,13 @@
                 <textarea class="textarea textarea-sm w-full h-14 text-sm" bind:value={charNotes} disabled={$taskRunning}></textarea>
               </div>
             </div>
+            {#if hasActs}
+              <div>
+                <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.acts.label')}</span>
+                <ActSelector options={actOptions} bind:value={charActs} disabled={$taskRunning} />
+                <p class="text-[11px] text-base-content/35 mt-0.5">{$t('config.acts.hint')}</p>
+              </div>
+            {/if}
             <div class="flex gap-1.5">
               <button class="btn btn-success btn-xs" on:click={saveCharacter} disabled={$taskRunning}>{$t('config.char.save')}</button>
               <button class="btn btn-ghost btn-xs" on:click={closeCharForm}>{$t('common.cancel')}</button>
@@ -615,6 +655,9 @@
                 <div class="flex-1 min-w-0">
                   <div class="text-sm font-medium truncate">{w.name} <span class="text-xs font-normal text-base-content/30">[{catLabels[w.category] || w.category}]</span></div>
                   <div class="text-xs text-base-content/40 line-clamp-1">{w.description}</div>
+                  {#if (w.acts || []).length}
+                    <div class="text-[11px] text-primary/70 mt-0.5 truncate">{$t('config.acts.on')}: {actsLabel(w.acts)}</div>
+                  {/if}
                 </div>
                 <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                   <button class="btn btn-ghost btn-xs px-1" on:click={() => openWvForm(w)} disabled={$taskRunning}>{$t('common.edit')}</button>
@@ -651,6 +694,13 @@
               <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.wv.tags')}</span>
               <input type="text" class="input input-sm w-full" bind:value={wvTags} placeholder={$t('config.wv.tags.placeholder')} disabled={$taskRunning} />
             </div>
+            {#if hasActs}
+              <div>
+                <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.acts.label')}</span>
+                <ActSelector options={actOptions} bind:value={wvActs} disabled={$taskRunning} />
+                <p class="text-[11px] text-base-content/35 mt-0.5">{$t('config.acts.hint')}</p>
+              </div>
+            {/if}
             <div class="flex gap-1.5">
               <button class="btn btn-success btn-xs" on:click={saveWorldview} disabled={$taskRunning}>{$t('common.save')}</button>
               <button class="btn btn-ghost btn-xs" on:click={closeWvForm}>{$t('common.cancel')}</button>
@@ -691,6 +741,9 @@
                   {#if (o.members || []).length > 0}
                     <div class="text-xs text-base-content/35 line-clamp-1 mt-0.5">{$t('config.org.membersList', { names: (o.members || []).map(id => nameById[id] || id).join(', ') })}</div>
                   {/if}
+                  {#if (o.acts || []).length}
+                    <div class="text-[11px] text-primary/70 mt-0.5 truncate">{$t('config.acts.on')}: {actsLabel(o.acts)}</div>
+                  {/if}
                 </div>
                 <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                   <button class="btn btn-ghost btn-xs px-1" on:click={() => openOrgForm(o)} disabled={$taskRunning}>{$t('common.edit')}</button>
@@ -728,6 +781,13 @@
                     </label>
                   {/each}
                 </div>
+              </div>
+            {/if}
+            {#if hasActs}
+              <div>
+                <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.acts.label')}</span>
+                <ActSelector options={actOptions} bind:value={orgActs} disabled={$taskRunning} />
+                <p class="text-[11px] text-base-content/35 mt-0.5">{$t('config.acts.hint')}</p>
               </div>
             {/if}
             <div class="flex gap-1.5">

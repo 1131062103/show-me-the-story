@@ -107,6 +107,29 @@ type MemoryEntry struct {
 	Snippet string `json:"snippet,omitempty"`
 }
 
+// Act is an act-level unit inside an Arc (v4 hierarchy: book → arc → act →
+// chapter). Acts are the drill-down granularity for outline generation: after
+// the arc outline (卷纲) is confirmed, each act gets its own narrative outline
+// (幕纲); after that is confirmed, the act's chapter outlines (章纲) are
+// generated, and only confirmed chapter outlines unlock prose generation.
+type Act struct {
+	ID      int    `json:"id"`
+	Title   string `json:"title"`
+	Goal    string `json:"goal"`
+	StartCh int    `json:"start_ch"`
+	EndCh   int    `json:"end_ch"`
+	// Outline is the act-level narrative outline (幕纲 product).
+	Outline string `json:"outline,omitempty"`
+	// Confirmed marks the 幕纲 confirmed by the user; gates 章纲 generation.
+	Confirmed bool `json:"confirmed,omitempty"`
+	// ChaptersConfirmed marks that the act's chapter outlines (章纲) were
+	// confirmed; gates prose generation for chapters in this act.
+	ChaptersConfirmed bool `json:"chapters_confirmed,omitempty"`
+	// Summary is filled by AI once every chapter in range is accepted; it
+	// replaces per-chapter context for completed acts in later prompts.
+	Summary string `json:"summary,omitempty"`
+}
+
 // Arc is a volume-level unit of the hierarchical outline (v3). Chapter
 // outlines are generated arc by arc so books with 1000+ chapters never need
 // a single outline call. Status is derived from the chapters in range.
@@ -116,6 +139,14 @@ type Arc struct {
 	Goal    string `json:"goal"`
 	StartCh int    `json:"start_ch"`
 	EndCh   int    `json:"end_ch"`
+	// Outline is the arc-level story outline (卷纲 product) in the new
+	// book → arc → act → chapter flow.
+	Outline string `json:"outline,omitempty"`
+	// Confirmed marks the 卷纲 confirmed by the user; gates 幕纲 generation.
+	Confirmed bool `json:"confirmed,omitempty"`
+	// Acts is the act-level breakdown of this arc (v4); empty for legacy
+	// projects that keep the v3 per-arc chapter generation path.
+	Acts []Act `json:"acts,omitempty"`
 	// Summary is filled by AI once every chapter in range is accepted; it
 	// replaces per-chapter context for completed arcs in later prompts.
 	Summary string `json:"summary,omitempty"`
@@ -128,6 +159,11 @@ type Progress struct {
 	StorySynopsis               string                   `json:"story_synopsis"`
 	Chapters                    []ChapterState           `json:"chapters"`
 	Arcs                        []Arc                    `json:"arcs,omitempty"`
+	// BookOverview is the book-level master plan (整书概览 product): theme,
+	// main storyline, arc progression logic. Gates 卷纲 generation.
+	BookOverview string `json:"book_overview,omitempty"`
+	// BookOverviewConfirmed marks the user's confirmation of the 整书概览.
+	BookOverviewConfirmed bool `json:"book_overview_confirmed,omitempty"`
 	CurrentChapterIndex         int                      `json:"current_chapter_index"`
 	StoryConfigSnapshot         *config.StoryConfig      `json:"story_config_snapshot,omitempty"`
 	Foreshadows                 []Foreshadow             `json:"foreshadows,omitempty"`

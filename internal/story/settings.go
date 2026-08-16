@@ -19,6 +19,9 @@ type Character struct {
 	Motivation  string `json:"motivation,omitempty"`
 	Abilities   string `json:"abilities,omitempty"`
 	Notes       string `json:"notes,omitempty"`
+	// Acts restricts this setting to specific acts (幕); empty means global
+	// (applies to every act). Only meaningful in v4 book→arc→act projects.
+	Acts []int `json:"acts,omitempty"`
 }
 
 type WorldviewEntry struct {
@@ -27,6 +30,8 @@ type WorldviewEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Tags        string `json:"tags,omitempty"`
+	// Acts restricts this setting to specific acts (幕); empty means global.
+	Acts []int `json:"acts,omitempty"`
 }
 
 type Organization struct {
@@ -35,6 +40,8 @@ type Organization struct {
 	Type        string   `json:"type"`
 	Description string   `json:"description"`
 	Members     []string `json:"members,omitempty"`
+	// Acts restricts this setting to specific acts (幕); empty means global.
+	Acts []int `json:"acts,omitempty"`
 }
 
 type Relation struct {

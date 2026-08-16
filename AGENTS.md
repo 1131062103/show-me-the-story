@@ -76,7 +76,7 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 | `internal/prose/units.go` | `CountProseUnits`（CJK +1；连续字母数字 token +1，内部 `.` `,` `-` `#` 连接；全角字母数字视同半角；标点/空白断词不计数；中英文共用） |
 | `internal/i18n/locale.go` | `LangZH`/`LangEN` 常量、`NormalizeLanguage`、`FromRequest` 从 `X-UI-Locale`/`Accept-Language`/`?locale=` 解析、`errorCatalog` 双语错误表、`T(lang, key, args)`（同时查 `messageCatalog` + `errorCatalog`）、`MsgArgs`、`systemPrompts` 内联 system prompt 集中表、`SystemPromptFor(lang, key)` |
 | `internal/i18n/messages.go` | `messageCatalog`：`log.*` SSE 日志 + `agent.*` 工具状态消息双语表（Go 侧 `%s`/`%d` 模板） |
-| `internal/config/config.go` | `APIConfig`（含 `URLStrict` 严格 URL 模式、`DefaultMaxTokens` 32768、`DefaultHTTPTimeoutSeconds` 600、`ContextBudgetTokens` 全书优化上下文预算、`DefaultContextBudgetTokens` 常量）、`Config`（含 `ProjectFormatVersion`、`SkillConfig` + `Language`）、`StoryConfig`、`PromptsConfig`、`SkillConfig` 结构体，Load/Save 函数（`LoadAPIConfig`/`LoadConfig`/`SaveConfig`），`DefaultConfigForLang(lang)`、`ApplyDefaults(lang)` 按语言选择默认 prompts |
+| `internal/config/config.go` | `APIConfig`（含 `URLStrict` 严格 URL 模式、`DefaultMaxTokens` 32768、`DefaultHTTPTimeoutSeconds` 600、`ContextBudgetTokens` 全书优化上下文预算、`DefaultContextBudgetTokens` 常量）、`Config`（含 `ProjectFormatVersion`、`SkillConfig` + `Language`）、`StoryConfig`（含 `ActsPerArc` 默认 4、`ChaptersPerAct` 默认 40）、`PromptsConfig`（含 v4 的 `BookOverview`/`ArcOutline`/`ActOutline`/`ActChapterOutline`/`ActSummary`）、`SkillConfig` 结构体，Load/Save 函数（`LoadAPIConfig`/`LoadConfig`/`SaveConfig`），`DefaultConfigForLang(lang)`、`ApplyDefaults(lang)` 按语言选择默认 prompts |
 | `internal/config/prompts.go` | `RenderPrompt`（`{{.KeyName}}` 替换）、`DefaultPromptsZH` 变量（所有内置中文提示词模板）、`DefaultPromptsForLang(lang)` |
 | `internal/config/prompts_en.go` | `DefaultPromptsEN`：全量英文模板（与中文一一对应） |
 | `internal/sse/logger.go` | `LogBroadcaster`；`LogEntry` 含 `msg_key`/`msg_args`；`InfoKey`/`SuccessKey`/…；`ToolCallEnd` 含 `result_key`/`result_args`；`Format`（SSE wire 格式）；`CurrentTask()` 任务栈；`TaskStart`/`TaskEnd` 与 warn/error 写入 `devlog`；领域事件方法（`ForeshadowSuggestions`/`ConfigChangeProposal`/`PostProcess*` 等）负载类型为 `any`，保持包领域无关 |
@@ -84,14 +84,15 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 | `internal/llm/jsonextract.go` | `ExtractJSON`/`WalkJSONStructure`：从自由格式模型输出中定位首个完整 JSON 对象（字符串感知的花括号匹配），story 事实核查与 agent 工具解析共用 |
 | `internal/llm/tokens.go` | `TaskTokenUsage` 任务级 token 累计器（context 挂载）、`WithTaskTokens`/`TaskTokensFromContext`、`EstimateTokensFromRunes`（rune×1.5 估算）、throttled SSE 推送 |
 | `internal/llm/api_url_test.go` | `resolveChatCompletionsURL` 表驱动测试（z.ai v4、strict、DeepSeek、完整 URL） |
-| `internal/story/state.go` | `Progress`（含 `Arcs []Arc` 卷结构）、`Arc`（卷：ID/Title/Goal/StartCh/EndCh/Summary）、`ChapterState`（含结构化出场 `Characters []OutlineChapterCharacter`、`WordCount` 字数、`ContentRev` 内容修订号、`Finalized` 后处理完成标记——分阶段写作下，章节确认补齐摘要/记忆后才为 true；false 表示正文已生成但摘要/记忆仍未生成，便于删除/驳回时判断）、`Foreshadow`、`MemoryEntry`（含 API 响应专用 `Snippet`）结构体，`LoadProgress`、`SaveProgress`（v3 分文件存储，见 `storage.go`）、`ChapterMarkdownPath`、`SaveChapterMarkdown(projectDir, ...)`、`ForeshadowRoadmapPath`（项目目录 `Foreshadows.md`） |
+| `internal/story/state.go` | `Progress`（含 `Arcs []Arc` 卷结构、`BookOverview` 整书概览 + `BookOverviewConfirmed`）、`Arc`（卷：ID/Title/Goal/StartCh/EndCh/Summary/Outline/Confirmed/Acts）、`Act`（幕：ID/Title/Goal/StartCh/EndCh/Outline/Confirmed/ChaptersConfirmed）、`ChapterState`（含结构化出场 `Characters []OutlineChapterCharacter`、`WordCount` 字数、`ContentRev` 内容修订号、`Finalized` 后处理完成标记——分阶段写作下，章节确认补齐摘要/记忆后才为 true；false 表示正文已生成但摘要/记忆仍未生成，便于删除/驳回时判断）、`Foreshadow`、`MemoryEntry`（含 API 响应专用 `Snippet`）结构体，`LoadProgress`、`SaveProgress`（v3 分文件存储，见 `storage.go`）、`ChapterMarkdownPath`、`SaveChapterMarkdown(projectDir, ...)`、`ForeshadowRoadmapPath`（项目目录 `Foreshadows.md`） |
 | `internal/story/storage.go` | **v3 存储层**：章节正文按章存 `chapters/NNNNNN.json`，`progress.json` 只存元数据（不含正文）；`saveChapterFiles`（fnv 内容哈希 `HashContent` 脏检查，仅重写变更章节 + 清理孤儿文件）、`loadChapterContents`、`ResetProgressFiles`（重置进度含章节目录）、`ProgressView`（API 响应视图：剥离正文、附 `word_count`/`content_rev`、解析记忆 `snippet`） |
 | `internal/story/blocks.go` | **v3 Block 模型**：`Block{ID,Type,Text}`（type: paragraph/dialogue/scene_break 仅展示提示）；`SyncChapterBlocks`（从 Content 派生 blocks，未变段落 ID 稳定，`\n\n` 分段、无空行退化 `\n`，sep 存 `BlockSep`）、`rebuildContentFromBlocks`、`UpdateBlock`/`DeleteBlock`/`InsertBlockAfter`（块编辑后重建 Content）、`ReviseBlockAction`（复用 `ChapterSegmentRevision` prompt 对单 block AI 修订）。内存中 Content 仍是唯一事实源，AI 流程不感知 blocks |
-| `internal/story/arcs.go` | **v3 层级大纲（卷）**：`Arc` 辅助（`arcForChapterNum`/`arcChapters`/`arcCompleted`/`ArcIndexByID`）、`GenerateArcSkeletonAction`（一次小调用生成全书卷骨架，`assignArcRanges` 把各卷章数换算为连续区间并强制总和等于 `chapter_count`；存在已确认/写作中章节时拒绝）、`GenerateArcOutlineAction`（按卷分批生成章纲，注入 `buildPreviousArcContext` 卷摘要前情 + `buildFutureArcsBlock` 后续卷约束）、`AppendArcAction`（追加新卷 + 生成章纲，失败回滚；无限连载增量入口）、`EnsureArcSummaries`（懒生成已完结卷的卷摘要） |
+| `internal/story/arcs.go` | **v3 层级大纲（卷）**：`Arc` 辅助（`arcForChapterNum`/`arcChapters`/`arcCompleted`/`ArcIndexByID`）、`GenerateArcSkeletonAction`（一次小调用生成全书卷骨架，`assignArcRanges`/`assignRanges` 把各卷章数换算为连续区间并强制总和等于 `chapter_count`；存在已确认/写作中章节时拒绝）、`GenerateArcOutlineAction`（按卷分批生成章纲，注入 `buildPreviousArcContext` 卷摘要前情 + `buildFutureArcsBlock` 后续卷约束）、`AppendArcAction`（追加新卷 + 生成章纲，失败回滚；无限连载增量入口）、`EnsureArcSummaries`（懒生成已完结卷的卷摘要）、`actBeforeChapterNum`（跨卷前一幕，供幕摘要闸使用）、`actIDForChapter`（全书扁平幕序号，供设定按幕归属过滤）、`containsInt` |
+| `internal/story/acts.go` | **v4 逐级大纲（书 → 卷 → 幕 → 章）**：`Act` 辅助（`ActIndexByID`/`actForChapterNum`/`actChapters`）、`GenerateBookOverviewAction`（整书概览：书级主线逻辑 + 卷骨架，`assignRanges` 排定各卷连续区间；存在已确认/写作中章节时拒绝，pending 章节清空）、`ConfirmBookOverviewAction`、`GenerateArcPlanAction`（卷纲：卷故事线 + 幕拆分，注入 `buildPreviousActContext` 前情 + `buildFutureArcsBlock` 反向约束 + `ActsPerArc`/`ChaptersPerAct`）、`ConfirmArcOutlineAction`、`EditArcAction`（改卷章数时用 `assignRanges` 重算全域区间并同步 `cfg.Story.ChapterCount` + 保存配置）、`GenerateActOutlineAction`（幕纲）、`ConfirmActOutlineAction`、`EditActAction`（改幕章数时重算卷内各幕区间）、`GenerateActChapterOutlineAction`（单幕章纲：复用 `generateOutlineChaptersOnly` + `chapterStateFromOutline` + `sortChaptersByNum` + `runOutlinePostProcessChecks`）、`ConfirmActChaptersAction`（首次确认幕章纲时切 `Phase="writing"`）、`GenerateActSummaryAction`（幕摘要：前一幕已完结但无摘要时，写作下一幕首章前生成并注入后续提示词） |
 | `internal/story/outline.go` | `OutlineChapterCharacter`（`name`/`first_appearance`/`note`）、`generateOutline`（注入 settings 角色列表 + 按 `target_words_per_chapter` 计算大纲字数下限，不足时自动重试）、`reviseOutline`、`GenerateOutlineAction`（存在已确认章节时拒绝整体重新生成；完成后 `runOutlinePostProcessChecks`）、`ReviseOutlineAction`、`ConfirmOutlineAction`、`EditChapterOutline`（仅 `pending` 可编辑，写作开始后大纲只读；可选 `characters` 更新结构化出场）、`cleanJSONResponse`、`GenerateContinuationOutline`（生成后续大纲） |
 | `internal/story/outline_helpers.go` | `calcOutlineLengthRange`、`formatCharacterListForOutline`、`validateOutlineChapterLengths`、`characterStubsForChapter`（优先 `characters` 结构化出场，缺省回退「首次登场」散文扫描）、`buildOutlineDerivedCharacterContext`（写作时注入未登记大纲人物 stub） |
 | `internal/story/outline_character.go` | `CheckOutlineCharacterConsistency`、`RunOutlineCharacterCheckAndSave`、`runOutlinePostProcessChecks`（伏笔-大纲 + 大纲人物双检查） |
-| `internal/story/writing.go` | `GenerateChapterAction`（开头懒调用 `EnsureArcSummaries`；含写前大纲一致性检查，共 3 步：大纲核对 → 撰写正文 → 事实核查；摘要/伏笔/叙事记忆/markdown 落盘**推迟到确认阶段**，章落 `StatusReview` 且 `Finalized=false`）、`ReviseChapterAction`/`ReviseSpecificChapterAction`（修订后同步更新伏笔与记忆并把章标记 `Finalized=true`；修改意见含 `> ` 引用行时经 `extractQuotedSentences`/`findParagraphsContaining`/`reviseChapterSegment` 只改匹配自然段，失败回退整章修订）、`ConfirmAndFinalizeChapterAction`（确认时补齐被推迟的摘要/伏笔/叙事记忆/markdown 并标记 `Finalized=true` 后推进指针）、`PolishChapterAction`、`SmoothTransitionsAction`（批量优化已确认章节衔接）、`parseFactCheckResult`（JSON 优先 + 字符串 fallback）、`checkOutlineConsistency`（写前检查本章大纲与已写剧情冲突）、`stripChapterMetaProse`、`appendIfMissingPlaceholder`（老项目旧模板缺新占位符时兜底追加）、`splitChapterOpening`、`syncMemoryAfterChapter`、`calcMemoryMaxTokens` |
+| `internal/story/writing.go` | `GenerateChapterAction`（开头懒调用 `EnsureArcSummaries`；v4 幕闸检查目标章所在幕 `ChaptersConfirmed`，未确认拒绝写作；v4 幕摘要闸：跨入新幕且前一幕已完结但无幕摘要时拒绝写作，提示先到大纲页生成幕摘要；含写前大纲一致性检查，共 3 步：大纲核对 → 撰写正文 → 事实核查；摘要/伏笔/叙事记忆/markdown 落盘**推迟到确认阶段**，章落 `StatusReview` 且 `Finalized=false`）、`ReviseChapterAction`/`ReviseSpecificChapterAction`（修订后同步更新伏笔与记忆并把章标记 `Finalized=true`；修改意见含 `> ` 引用行时经 `extractQuotedSentences`/`findParagraphsContaining`/`reviseChapterSegment` 只改匹配自然段，失败回退整章修订）、`ConfirmAndFinalizeChapterAction`（确认时补齐被推迟的摘要/伏笔/叙事记忆/markdown 并标记 `Finalized=true` 后推进指针）、`PolishChapterAction`、`SmoothTransitionsAction`（批量优化已确认章节衔接）、`parseFactCheckResult`（JSON 优先 + 字符串 fallback）、`checkOutlineConsistency`（写前检查本章大纲与已写剧情冲突）、`stripChapterMetaProse`、`appendIfMissingPlaceholder`（老项目旧模板缺新占位符时兜底追加）、`splitChapterOpening`、`syncMemoryAfterChapter`、`calcMemoryMaxTokens` |
 | `internal/story/writing_length.go` | `calcChapterLengthRange`（±1000 字或 ±15% 取较大者）、`generateChapterContentWithLengthControl`（生成/重写间 `maybeUpdateBestDraft` 保留最佳稿；略超/略低 soft 容忍跳过 adjust；仍超限 `log.chapter_length_off_range` 警告，不阻塞自动确认）、老模板 `finalizeChapterWritingPrompt` 兜底 |
 | `internal/story/writing_delete.go` | `ResolveDeleteChapterTarget` / `DeleteFrontierChapter`：清除**写作前沿**章节正文，同步回退指针、清除该章叙事记忆、`Finalized=false`；`RejectChapterAction`：**审核驳回**（仅当前 `review` 章），清除正文/记忆并留在本章；`FormatWritingFrontierInfo` 注入 Agent 系统提示 |
 | `internal/story/writing_conflict.go` | `analyzeWritingConflict`、`WritingConflictError`、事实核查多次失败后的根因分析与用户处理选项；`ResolveForceReviewIndex` / `PromoteWritingToReview`（冲突章或孤儿 `writing` 前沿章 → `review`） |
@@ -99,12 +100,12 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 | `internal/story/importer.go` | **v3 导入流水线**：`SplitImportContent`（本地切章：标题正则 + 无标题按 ~6000 字块切分）、`BuildImportPreview`、`ImportState`/`Load/SaveImportState`（`import.json` 断点）、`ImportStartAction`（切章落盘为 accepted → 元信息分析 → 逐章 outline/summary，每章一个检查点）、`ImportResumeAction`（断点续跑）、`createImportArcs`（≥40 章自动分卷 30 章/卷） |
 | `internal/story/reconcile.go` | `ReconcileSettingsAction`（保持用户提交的 `newSettings`，AI 调整差异写入 pending 提案）、`regeneratePendingOutlines`、设定协调逻辑 |
 | `internal/story/config_guard.go` | `ConfigFieldChange`/`PendingConfigChanges` 结构体，`CollectStoryConfigConflicts`、`applyStoryConfigMerge`、`applyOutlineMetaWithGuard`、`Load/SavePendingConfigChanges`（`pending_config_changes.json`）、`ApplySelectedPendingChanges`、`SyncProgressMetaFromStory` |
-| `internal/story/settings.go` | `Character`、`WorldviewEntry`、`Organization`、`Relation`、`ProjectSettings` 结构体（含 `NextCharacterID` 等 ID 分配），`LoadProjectSettings`、`SaveProjectSettings` |
+| `internal/story/settings.go` | `Character`、`WorldviewEntry`、`Organization`、`Relation`、`ProjectSettings` 结构体（含 `NextCharacterID` 等 ID 分配；角色/世界观/组织含可选 `Acts []int` 按幕归属过滤），`LoadProjectSettings`、`SaveProjectSettings` |
 | `internal/story/skills.go` | `Skill`（含 `Lang` 字段）结构体（`SkillConfig` 在 `internal/config`），`LoadBuiltinSkills`、`LoadProjectSkills`、`MergeSkills`、`GetEnabledSkills`、`GetEnabledSkillsByCategory`、`FilterSkillsByLang(skills, projectLang)`、`FormatSkillsContent`（按 skill 语言选择双语 header）、`//go:embed embeds/skills` |
 | `internal/story/editing.go` | `EditChapterContent` 章节正文局部编辑（`replace_lines`/`replace_text`/`insert_after_line`/`append`），`EditChapterContentRequest` 结构体，`EditOp` 常量，`FindChapterIdx` 辅助函数 |
 | `internal/story/chat.go` | `ChatSession`、`ChatMessage`（含 `tool_result_key`/`tool_result_args`）、`ToolCall`、`ChatSessionIndex` 结构体，Load/Save/Delete、`ChatSessionsDir`/`GenerateSessionID`/`GenerateChatTitle` |
 | `internal/story/postprocess.go` | `PostProcessState`/`RoadmapItem` 结构体（含 `author_requirements` 全书优化补充要求）、`LoadPostProcess`/`SavePostProcess`（`postprocess.json`）、`buildPostProcessBundle`（设定+摘要+全文组装与长文策略）、`DiagnoseBookAction`、`ConsistencyCheckBookAction`（超长书按卷分段）、`BuildRoadmapAction`（注入 `{{.AuthorRequirements}}`）、`FullPostProcessAnalyzeAction`（诊断→核查→路线图）、`planExecuteBatches`（有补充要求时覆盖全书各章并与勾选工单合并为一次修订；否则仅勾选工单）、`ExecuteRoadmapAction`（可选前置衔接优化 + 按批定向修订/润色 + diff 节选）、`IsBookFullyAccepted` |
-| `internal/story/inject.go` | 注入块的双语版本：`buildOutlineConstraintsForLang`（有卷摘要的已完结卷压缩为一行卷摘要）、`buildPreviousChapterTailForLang`、`buildHistorySummaryForLang`、`buildCharacterContextForLang`、`buildWorldviewContextForLang`、`formatActiveForeshadowsForChapterLang`、`formatChapterLine`、`formatForeshadowsForPromptLang`、`buildMemoryForLang`（叙事记忆注入）、`extractSnippet`（按段落位置截取原文片段）、`formatMemoryForUpdatePrompt` |
+| `internal/story/inject.go` | 注入块的双语版本：`buildOutlineConstraintsForLang`（有卷摘要的已完结卷压缩为一行卷摘要）、`buildPreviousChapterTailForLang`、`buildHistorySummaryForLang`、`buildCharacterContextForLang`、`buildWorldviewContextForLang`（按幕过滤：整书概览项目下注入 `actIDForChapter` 计算的目标章幕序号，仅注入匹配幕的角色/世界观/组织，`Acts` 为空视为全局；`actID=0` 时不过滤）、`formatActiveForeshadowsForChapterLang`、`formatChapterLine`、`formatForeshadowsForPromptLang`、`buildMemoryForLang`（叙事记忆注入）、`extractSnippet`（按段落位置截取原文片段）、`formatMemoryForUpdatePrompt` |
 | `internal/story/*_test.go` | 领域层单测：存储 roundtrip/脏检查/孤儿清理、Block ID 稳定性与 CRUD、卷区间换算与上下文压缩、导入切章/断点、引用式段落修订、字数区间、删章目标解析等 |
 | `internal/agent/agent.go` | `Tool`、`AgentContext`、`AgentStep` 结构体（`ToolCall` 别名指向 `story.ToolCall`），`RunAgentLoop`（多轮消息历史 + 双语 tool 结果标签）、工具调用解析（`llm.ExtractJSON` 字符串感知；未闭合/解析失败时注入诊断提示让模型重试一次，仍失败则 `agent.output_truncated` / `agent.tool_call_parse_failed`，不修复截断 JSON）、内置工具集（读/写角色/世界观/章节等）、`buildAgentSystemPromptZH`/`buildAgentSystemPromptEN`、`update_project_config` 覆盖已填字段需 `confirm_overwrite: true`、`requireConfirm`（破坏性工具需 `confirm: true`）；文件内含原 `agent_i18n.go` 的 `agentMsg`/`agentErr` i18n 辅助 |
 | `internal/agent/agent_truncated_test.go` | Agent 工具调用解析单元测试：截断不修复、`ExtractJSON` 字符串感知、失败尝试识别、解析重试反馈、`finish_reason` 截断检测 |
@@ -135,8 +136,8 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 | `src/lib/i18n/index.js` | `uiLocale`、`t`/`translate`（`{name}`）、`formatKeyedMessage`/`formatLogEntry`/`formatToolResult`（服务端 key + `{0}`）、`translateServerMessage` legacy 兜底 |
 | `src/lib/i18n/zh.js`, `en.js` | 扁平 key 字典；新增可见文案必须同时在两个文件加 key |
 | `src/pages/Projects.svelte` | 项目选择页：新建项目（名称全宽 + 中文/EN 分段按钮选语言，POST 时携带 `language`）+ 项目列表（每项显示语言 badge，可选择/删除）；选中项目后 `setLocale(project.language)` |
-| `src/pages/Config.svelte` | 配置页：API 配置（含 `url_strict` 严格 URL 模式、解析后 endpoint 预览、上下文预算 tokens、连接测试结果持久化展示——结果存 `apiTestResult` store 切页不丢失，成功/失败以文字+着色卡片与按钮描边展示，修改任一影响连接的字段后自动清除）、故事配置（直接 PUT 保存 + 关键设定变更时提示协调）、写作风格与叙述视角、AI 配置变更确认面板（`ConfigChangePanel`）、角色管理、世界观管理、组织管理（卡片 + 成员勾选）、关系管理（卡片 + 源/目标实体选择）；任务运行时所有输入控件禁用 |
-| `src/pages/Outline.svelte` | 大纲页：直接操作按钮（生成/确认/修订意见/删除/生成后续大纲）+ **卷结构面板**（生成卷骨架、按卷生成/重生成章纲（可附本卷补充要求）、追加新卷）+ **导入流水线**（本地切章预览 → 开始导入 → 断点恢复横幅，`GET /api/import/status` 探测）+ `pending` 章节点击后通过原生顶层弹窗编辑（不受页面滚动容器裁切；章节列表仅显示序号与标题；手机端适配安全边距、视口高度与可滚动内容区，写作冲突跳转时经 `sessionStorage` 聚焦冲突章；弹窗内可编辑结构化出场 `characters` 徽章与按行编辑）+ 流式预览 + 标题/梗概展示优先 config（`preferUserValue` 一致）+ `ConfigChangePanel` + 未登记大纲人物确认面板（SSE `outline_character_suggestions`） |
+| `src/pages/Config.svelte` | 配置页：API 配置（含 `url_strict` 严格 URL 模式、解析后 endpoint 预览、上下文预算 tokens、连接测试结果持久化展示——结果存 `apiTestResult` store 切页不丢失，成功/失败以文字+着色卡片与按钮描边展示，修改任一影响连接的字段后自动清除）、故事配置（直接 PUT 保存 + 关键设定变更时提示协调）、写作风格与叙述视角、AI 配置变更确认面板（`ConfigChangePanel`）、角色管理、世界观管理、组织管理（卡片 + 成员勾选，三类卡片/表单均支持「仅在这些幕生效」多选徽章，仅整书概览项目显示）、关系管理（卡片 + 源/目标实体选择）；任务运行时所有输入控件禁用 |
+| `src/pages/Outline.svelte` | 大纲页：直接操作按钮（生成/确认/修订意见/删除/生成后续大纲）+ **整书概览面板**（生成/确认整书概览，确认后解锁卷纲）+ **卷结构面板**（生成卷骨架、按卷生成/重生成章纲（可附本卷补充要求）、追加新卷；v4 分流：`BookOverview` 非空时改为「生成/重新生成卷纲 + 确认卷纲 + 修缮」并下钻**幕层级**（生成/确认幕纲 → 生成/确认章纲，各层未确认时锁下层层级按钮））+ **导入流水线**（本地切章预览 → 开始导入 → 断点恢复横幅，`GET /api/import/status` 探测）+ `pending` 章节点击后通过原生顶层弹窗编辑（不受页面滚动容器裁切；章节列表仅显示序号与标题；手机端适配安全边距、视口高度与可滚动内容区，写作冲突跳转时经 `sessionStorage` 聚焦冲突章；弹窗内可编辑结构化出场 `characters` 徽章与按行编辑）+ 流式预览 + 标题/梗概展示优先 config（`preferUserValue` 一致）+ `ConfigChangePanel` + 未登记大纲人物确认面板（SSE `outline_character_suggestions`） |
 | `src/components/ConfigChangePanel.svelte` | AI 配置变更确认面板：展示 pending 提案（当前 vs 建议）、勾选采纳 / 全部忽略；SSE `config_change_proposal` 触发 |
 | `src/pages/Writing.svelte` | 写作页（v3：正文按需经 `GET /api/chapters/{num}` 拉取，`content_rev` 变化时刷新缓存；字数展示用索引里的 `word_count`；导出走 `GET /api/export/txt`；正文以 block 列表渲染，桌面 hover 出现编辑/AI 修订/插入/删除工具条，手机直接点按段落展开/再次点按收起同等操作，内联编辑与段落级 AI 修订）：章节列表（状态点）+ 直接操作（生成/确认/修改意见/去AI味，自动区分当前章修订与定向修订；确认改为异步，确认时补齐摘要/记忆）+ **审核驳回**按钮（当前 `review` 章，ConfirmModal 确认）+ **写作回退**按钮（DELETE `/api/chapter`，仅当写作前沿可删时显示，ConfirmModal 确认）+ 正文框选后浮动「引用到修改意见」按钮（插入 `> ` 引用行，触发段落级修订）+ 事实核查冲突处理面板（`pending_writing_conflict`：改大纲/伏笔/重试/`force_review`；`dismiss`≡保留稿进入审核）+ 孤儿 `writing` 恢复条（无 conflict 记录时仍可重新生成或进入审核）+ 自动确认模式开关（toggle，随时可开关）+ 伏笔追踪摘要卡片（活跃/超期/临近回收）+ 优化章节衔接（进度卡片工具栏小按钮，已确认 ≥ 2 章时显示）+ 导出 TXT + 复制 + 上下章导航 + 流式尾部窗口展示（含「仅显示最新内容」提示；任务进行中当前章显示 taskTokenUsage，空闲时以 `countProseUnits` 显示正文字数）+ rAF 自动滚动（自动确认模式下自动跟随正在生成的章节）+ 全书完成后展示 `PostProcessPanel` |
 | `src/components/TaskTokenBadge.svelte` | 任务 token 展示（`↑ prompt ↓ completion tokens`）；对 `taskTokenUsage` 更新做线性 rAF 插值，动画时长 = `TOKEN_POLL_INTERVAL_MS`；目标值低于当前显示值时该维度从 0 重新向上插值（新一段统计或估算修正）；供 ChatPanel / App 顶栏 / Writing 页复用 |
@@ -321,6 +322,39 @@ API 配置（`APIConfig`）与故事配置（`Config`）完全分离，分别保
 ```
 
 普通短篇不受影响：`state.Arcs` 为空时所有路径与 v2 行为一致。删除大纲（`DELETE /api/outline`）同时清空 Arcs。
+
+### 逐级大纲（书 → 卷 → 幕 → 章，v4）
+
+超长篇的另一种组织方式：不直接生成 卷→章 两级，而是先「整书概览」，再逐卷细化。约束逐级增强，每级一个独立 AI 调用，且**逐级严格确认**后才能进入下一级：
+
+```
+整书概览（一次小调用）     POST /api/book-overview/generate
+  BookOverview（书级主线逻辑）+ Arc{title, goal, chapter_count}[] 卷骨架
+  assignRanges 排定各卷连续区间，总和 == chapter_count；存在已确认/写作中章节时拒绝，
+  pending 章节清空；ai 填 config 空字段（title/synopsis），冲突走 pending 提案
+    ↓ POST /api/book-overview/confirm（解锁卷纲）
+  POST /api/arcs/{id}/outline  ← BookOverview 非空时分流到 GenerateArcPlanAction
+  卷纲（卷故事线 + 幕拆分）：注入 buildPreviousActContext 前情 + buildFutureArcsBlock
+  反向约束 + StoryConfig.ActsPerArc(默认4)/ChaptersPerAct(默认40) 引导拆分
+    ↓ POST /api/arcs/{id}/outline-confirm（解锁幕纲）
+  POST /api/arcs/{id}/acts/{aid}/outline
+  幕纲（幕叙事大纲）：注入本卷卷纲 + 前幕幕纲 + 前 5 章尾部摘要 + 后幕/后卷 goal
+    ↓ POST /api/arcs/{id}/acts/{aid}/outline-confirm（解锁章纲）
+  POST /api/arcs/{id}/acts/{aid}/chapters
+  单幕章纲（一次调用生成该幕全部章节）：复用 generateOutlineChaptersOnly
+    ↓ POST /api/arcs/{id}/acts/{aid}/chapters-confirm（首次确认切 Phase="writing"）
+  逐章正文（现有写作流程）
+    ↓ 跨入新幕时（前一幕已完结但无摘要）
+  POST /api/arcs/{id}/acts/{aid}/summary
+  幕摘要（幕级前情压缩，注入后续写作的 buildPreviousActContext）
+```
+
+- **确认门**：卷纲确认后才可生成该卷幕纲；幕纲确认后才可生成该幕章纲；章纲确认后才可写作该幕章节（`GenerateChapterAction` 内的幕闸检查 `actForChapterNum(...).ChaptersConfirmed`）。未确认的层级前端锁定并提示。
+- **幕摘要闸**：写作下一幕首章前，若前一幕（跨卷取上一卷末幕，`actBeforeChapterNum`）已完结但 `Summary == ""`，`GenerateChapterAction` 拒绝写作并提示到大纲页生成幕摘要（`POST /api/arcs/{id}/acts/{aid}/summary`）；幕摘要随 `buildPreviousActContext` 注入后续写作 prompt。
+- **设定按幕归属**：整书概览项目下，角色/世界观/组织可配置「仅在这些幕生效」（`Acts []int`，存全书扁平幕序号，`actIDForChapter` 计算），写作时 `buildCharacterContextForLang`/`buildWorldviewContextForLang` 只注入匹配目标章幕序号的设定；`Acts` 为空视为全程生效；非整书概览项目该 UI 隐藏。
+- **修缮**：概览/卷纲确认前可编辑（`PUT /api/arcs/{id}` 改卷名/目标/章数 → 重算全域区间 + 同步 `chapter_count`；`PUT /api/arcs/{id}/acts/{aid}` 改幕名/目标/章数 → 重算卷内幕区间）。已生成卷纲/幕纲的卷/幕禁止直接改章数（可重新生成）。
+- **老项目兼容**：`state.BookOverview == ""` 时 `/api/arcs/{id}/outline` 保持 v3 的按卷生成章纲行为，幕层完全不可见；`state.Arcs == nil` 走 v2 单级大纲。
+- **卷章数可不均等**：`assignRanges` 按各卷/各幕章数比例排定连续区间（示例：1200 章、7 卷、前 6 卷各 ~200 章、末卷 30~40 章）。
 
 ### 大纲反向约束 + 写前一致性检查
 
@@ -507,8 +541,18 @@ API 配置保存 `api.json`，故事配置保存 `config.json`。设定保存 `s
 | POST | `/api/outline/revise` | 异步 | 修订大纲 |
 | POST | `/api/outline/generate-continuation` | 异步 | 生成续写大纲 |
 | POST | `/api/arcs/skeleton` | 异步 | 生成全书卷级骨架（存在已确认/写作中章节时 409 拒绝，会清空 pending 章节） |
-| POST | `/api/arcs/{id}/outline` | 异步 | 为指定卷生成逐章大纲（body 可带 `requirements` 补充要求；卷内存在非 pending 章节时拒绝） |
+| POST | `/api/arcs/{id}/outline` | 异步 | 为指定卷生成逐章大纲（body 可带 `requirements` 补充要求；卷内存在非 pending 章节时拒绝）。**v4**：`BookOverview` 非空时分流为生成卷纲（卷故事线 + 幕拆分） |
 | POST | `/api/arcs/append` | 异步 | 追加新卷并生成其章纲（`{title?, goal?, chapter_count?}`，默认 20 章；完成后自动扩大 `chapter_count`） |
+| POST | `/api/book-overview/generate` | 异步 | 生成整书概览（书级主线逻辑 + 卷骨架；存在已确认/写作中章节时 409 拒绝，pending 章节清空） |
+| POST | `/api/book-overview/confirm` | 同步 | 确认整书概览，解锁卷纲生成 |
+| PUT | `/api/arcs/{id}` | 同步 | 编辑卷（title/goal/chapter_count；改章数重算全域区间并同步 `chapter_count`，仅卷纲生成前允许） |
+| POST | `/api/arcs/{id}/outline-confirm` | 同步 | 确认卷纲，解锁本卷幕纲生成 |
+| PUT | `/api/arcs/{id}/acts/{aid}` | 同步 | 编辑幕（title/goal/chapter_count；改章数重算卷内幕区间，仅幕纲生成前允许） |
+| POST | `/api/arcs/{id}/acts/{aid}/outline` | 异步 | 生成幕纲（需本卷卷纲已确认） |
+| POST | `/api/arcs/{id}/acts/{aid}/outline-confirm` | 同步 | 确认幕纲，解锁本幕章纲生成 |
+| POST | `/api/arcs/{id}/acts/{aid}/chapters` | 异步 | 一次生成该幕全部章节章纲（需本幕幕纲已确认） |
+| POST | `/api/arcs/{id}/acts/{aid}/chapters-confirm` | 同步 | 确认幕章纲，解锁本幕写作（首次确认切 `Phase="writing"`） |
+| POST | `/api/arcs/{id}/acts/{aid}/summary` | 异步 | 生成幕摘要（幕级前情压缩；前一幕已完结但无摘要、写作下一幕首章前生成，注入后续 `buildPreviousActContext`） |
 | POST | `/api/outline/characters/confirm` | 同步 | 批量采纳未登记大纲人物为角色条目 |
 | PUT | `/api/outline/{num}` | 同步 | 编辑指定章节大纲（`pending`/`writing`/`review`；`accepted` 拒绝；body 可选 `characters` 结构化出场） |
 | POST | `/api/settings/reconcile` | 异步 | 协调设定与已有内容 |
@@ -625,6 +669,11 @@ API 配置保存 `api.json`，故事配置保存 `config.json`。设定保存 `s
 | `ArcSkeleton` | `arc_skeleton` | 全书卷级骨架生成（每卷 title/goal/chapter_count，总章数强制等于配置） |
 | `ArcChapterOutline` | `arc_chapter_outline` | 单卷逐章大纲生成（注入卷摘要前情 + 后续卷反向约束 + 用户补充要求） |
 | `ArcSummary` | `arc_summary` | 卷摘要压缩（逐章摘要 → 400~800 字卷级前情，保留一次性事件与遗留悬念） |
+| `BookOverview` | `book_overview` | 整书概览生成（书级主线逻辑 + 卷骨架，各卷 title/goal/chapter_count） |
+| `ArcOutline` | `arc_outline` | 卷纲生成（卷故事线 + 幕拆分，注入 BookOverview + 前情 + 后续卷约束 + `ActsPerArc`/`ChaptersPerAct`） |
+| `ActOutline` | `act_outline` | 幕纲生成（幕叙事大纲，注入本卷卷纲 + 前幕前情 + 后幕/后卷约束） |
+| `ActChapterOutline` | `act_chapter_outline` | 单幕章纲生成（一次调用生成该幕全部章节，复用 `generateOutlineChaptersOnly`） |
+| `ActSummary` | `act_summary` | 幕摘要压缩（幕级前情，随 `buildPreviousActContext` 注入后续写作 prompt） |
 
 新增 prompt 模板时需要：(1) 在 `PromptsConfig` 添加字段，(2) 在 `DefaultPrompts` 添加默认值，(3) 在 `applyDefaults` 添加 fallback。
 

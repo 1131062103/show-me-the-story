@@ -3084,7 +3084,15 @@ func (h *Handlers) PostArcOutline(w http.ResponseWriter, r *http.Request) {
 		ctx := h.taskCtx
 		ai := story.ArcIndexByID(h.state, arcID)
 		h.logger.InfoKey("log.arc_outline_generating", ai+1)
-		err := story.GenerateArcOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.settings, arcID, body.Requirements, h.progressPath, h.logger)
+		var err error
+		if h.state.BookOverview != "" {
+			// v4：整书概览流程 —— 该端点生成卷纲（卷故事线 + 幕拆分）。
+			h.logger.InfoKey("log.arc_plan_generating", ai+1)
+			err = story.GenerateArcPlanAction(ctx, h.apiCfg, h.cfg, h.state, h.settings, arcID, body.Requirements, h.progressPath, h.logger)
+		} else {
+			// 老项目：按卷一次生成章纲。
+			err = story.GenerateArcOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.settings, arcID, body.Requirements, h.progressPath, h.logger)
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				h.logger.WarnKey("log.arc_task_cancelled")
@@ -3146,6 +3154,303 @@ func (h *Handlers) PostArcAppend(w http.ResponseWriter, r *http.Request) {
 			story.SaveProgress(h.progressPath, h.state)
 		}
 		h.logger.TaskEnd("arc_append", true)
+		h.broadcastProgress()
+	}()
+	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+// PostBookOverviewGenerate 生成整书概览（书级主线逻辑 + 卷骨架），异步。
+func (h *Handlers) PostBookOverviewGenerate(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
+	for _, ch := range h.state.Chapters {
+		if ch.Status == story.StatusAccepted || ch.Status == story.StatusWriting || ch.Status == story.StatusReview {
+			h.writeErrorReq(w, r, http.StatusConflict, "accepted_chapter_present")
+			return
+		}
+	}
+	if !h.tryStartTask() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	go func() {
+		defer h.endTask()
+		h.logger.TaskStart("book_overview")
+		ctx := h.taskCtx
+		h.logger.InfoKey("log.book_overview_generating")
+		err := story.GenerateBookOverviewAction(ctx, h.apiCfg, h.cfg, h.state, h.settings, h.progressPath, h.cfgPath, h.logger)
+		if err != nil {
+			if ctx.Err() != nil {
+				h.logger.WarnKey("log.arc_task_cancelled")
+			} else {
+				h.logger.ErrorKey("log.arc_task_failed", err.Error())
+			}
+			h.logger.TaskEnd("book_overview", false)
+			return
+		}
+		h.state.Phase = "outline"
+		if err := story.SaveProgress(h.progressPath, h.state); err != nil {
+			h.logger.ErrorKey("log.arc_task_failed", err.Error())
+		}
+		h.logger.TaskEnd("book_overview", true)
+		h.broadcastProgress()
+	}()
+	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+// PostBookOverviewConfirm 确认整书概览，解锁卷纲生成。
+func (h *Handlers) PostBookOverviewConfirm(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	if err := story.ConfirmBookOverviewAction(h.state, h.progressPath); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
+}
+
+// PutArc 编辑卷的标题/目标/章数（修缮整书概览）。
+func (h *Handlers) PutArc(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	var arcID int
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &arcID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	var body struct {
+		Title        string `json:"title"`
+		Goal         string `json:"goal"`
+		ChapterCount int    `json:"chapter_count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if err := story.EditArcAction(h.state, h.cfg, h.cfgPath, arcID, body.Title, body.Goal, body.ChapterCount); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if err := story.SaveProgress(h.progressPath, h.state); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_progress_failed", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
+}
+
+// PostArcOutlineConfirm 确认卷纲，解锁幕纲生成。
+func (h *Handlers) PostArcOutlineConfirm(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	var arcID int
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &arcID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if err := story.ConfirmArcOutlineAction(h.state, h.progressPath, arcID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
+}
+
+// PostActOutline 为指定幕生成幕纲（异步）。
+func (h *Handlers) PostActOutline(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
+	var arcID, actID int
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &arcID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if _, err := fmt.Sscanf(r.PathValue("aid"), "%d", &actID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if !h.tryStartTask() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	go func() {
+		defer h.endTask()
+		h.logger.TaskStart("act_outline")
+		ctx := h.taskCtx
+		h.logger.InfoKey("log.act_outline_generating", arcID, actID)
+		err := story.GenerateActOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.settings, arcID, actID, h.progressPath, h.logger)
+		if err != nil {
+			if ctx.Err() != nil {
+				h.logger.WarnKey("log.arc_task_cancelled")
+			} else {
+				h.logger.ErrorKey("log.arc_task_failed", err.Error())
+			}
+			h.logger.TaskEnd("act_outline", false)
+			return
+		}
+		h.logger.TaskEnd("act_outline", true)
+		h.broadcastProgress()
+	}()
+	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+// PostActOutlineConfirm 确认幕纲，解锁章纲生成。
+func (h *Handlers) PostActOutlineConfirm(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	var arcID, actID int
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &arcID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if _, err := fmt.Sscanf(r.PathValue("aid"), "%d", &actID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if err := story.ConfirmActOutlineAction(h.state, h.progressPath, arcID, actID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
+}
+
+// PutAct 编辑幕的标题/目标/章数（修缮卷纲）。
+func (h *Handlers) PutAct(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	var arcID, actID int
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &arcID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if _, err := fmt.Sscanf(r.PathValue("aid"), "%d", &actID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	var body struct {
+		Title        string `json:"title"`
+		Goal         string `json:"goal"`
+		ChapterCount int    `json:"chapter_count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if err := story.EditActAction(h.state, arcID, actID, body.Title, body.Goal, body.ChapterCount); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if err := story.SaveProgress(h.progressPath, h.state); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "save_progress_failed", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
+}
+
+// PostActChapters 为指定幕生成该幕全部章节的章纲（异步）。
+func (h *Handlers) PostActChapters(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
+	var arcID, actID int
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &arcID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if _, err := fmt.Sscanf(r.PathValue("aid"), "%d", &actID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if !h.tryStartTask() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	go func() {
+		defer h.endTask()
+		h.logger.TaskStart("act_chapters")
+		ctx := h.taskCtx
+		h.logger.InfoKey("log.act_chapters_generating", arcID, actID)
+		err := story.GenerateActChapterOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.settings, arcID, actID, h.progressPath, h.logger)
+		if err != nil {
+			if ctx.Err() != nil {
+				h.logger.WarnKey("log.arc_task_cancelled")
+			} else {
+				h.logger.ErrorKey("log.arc_task_failed", err.Error())
+			}
+			h.logger.TaskEnd("act_chapters", false)
+			return
+		}
+		h.logger.TaskEnd("act_chapters", true)
+		h.broadcastProgress()
+	}()
+	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+// PostActChaptersConfirm 确认该幕章纲，解锁本幕章节写作。
+func (h *Handlers) PostActChaptersConfirm(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	var arcID, actID int
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &arcID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if _, err := fmt.Sscanf(r.PathValue("aid"), "%d", &actID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if err := story.ConfirmActChaptersAction(h.state, h.progressPath, arcID, actID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
+}
+
+// PostActSummary 为已完结的幕生成幕摘要（异步）。
+func (h *Handlers) PostActSummary(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
+	var arcID, actID int
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &arcID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if _, err := fmt.Sscanf(r.PathValue("aid"), "%d", &actID); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_request_body")
+		return
+	}
+	if !h.tryStartTask() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	go func() {
+		defer h.endTask()
+		h.logger.TaskStart("act_summary")
+		ctx := h.taskCtx
+		err := story.GenerateActSummaryAction(ctx, h.apiCfg, h.cfg, h.state, arcID, actID, h.progressPath, h.logger)
+		if err != nil {
+			if ctx.Err() != nil {
+				h.logger.WarnKey("log.arc_task_cancelled")
+			} else {
+				h.logger.ErrorKey("log.arc_task_failed", err.Error())
+			}
+			h.logger.TaskEnd("act_summary", false)
+			return
+		}
+		h.logger.TaskEnd("act_summary", true)
 		h.broadcastProgress()
 	}()
 	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
