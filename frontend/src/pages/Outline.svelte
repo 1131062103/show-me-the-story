@@ -34,12 +34,54 @@
   let reviseFeedback = '';
   let showRevise = false;
 
-  // 内联编辑
+  // 章节编辑状态
   let editingNum = -1;
   let editTitle = '';
   let editOutline = '';
+
+  // 顶层原生弹窗编辑（不受页面滚动容器裁切）
   let showOutlineEditor = false;
   let outlineEditorDialog;
+  let editCharactersText = '';
+
+  // Cast edit lines: "Name", "Name*", "Name|note", "Name*|note" (* = first appearance)
+  function formatCharactersEdit(chars) {
+    if (!chars?.length) return '';
+    return chars.map(c => {
+      let line = c.name || '';
+      if (c.first_appearance) line += '*';
+      if (c.note) line += '|' + c.note;
+      return line;
+    }).join('\n');
+  }
+
+  function parseCharactersEdit(text) {
+    const out = [];
+    const seen = new Set();
+    for (const raw of (text || '').split('\n')) {
+      const line = raw.trim();
+      if (!line) continue;
+      let namePart = line;
+      let note = '';
+      const bar = line.indexOf('|');
+      if (bar >= 0) {
+        namePart = line.slice(0, bar).trim();
+        note = line.slice(bar + 1).trim();
+      }
+      let first = false;
+      if (namePart.endsWith('*')) {
+        first = true;
+        namePart = namePart.slice(0, -1).trim();
+      }
+      if (!namePart || seen.has(namePart)) continue;
+      seen.add(namePart);
+      const entry = { name: namePart };
+      if (first) entry.first_appearance = true;
+      if (note) entry.note = note;
+      out.push(entry);
+    }
+    return out;
+  }
 
   // 导入续写（v3 流水线）
   let showImport = false;
@@ -178,6 +220,7 @@
     editingNum = ch.num;
     editTitle = ch.title;
     editOutline = ch.outline;
+    editCharactersText = formatCharactersEdit(ch.characters);
     showOutlineEditor = true;
   }
 
@@ -190,7 +233,11 @@
     if (!canEditOutline) { addToast($t('outline.toasts.editLocked'), 'error'); return; }
     if (!editTitle.trim() || !editOutline.trim()) { addToast($t('outline.toasts.editRequired'), 'error'); return; }
     try {
-      await api('PUT', '/api/outline/' + editingNum, { title: editTitle.trim(), outline: editOutline.trim() });
+      await api('PUT', '/api/outline/' + editingNum, {
+        title: editTitle.trim(),
+        outline: editOutline.trim(),
+        characters: parseCharactersEdit(editCharactersText),
+      });
       progress.set(await api('GET', '/api/progress'));
       addToast($t('outline.toasts.editSaved', { num: editingNum }), 'success');
       editingNum = -1;
@@ -447,8 +494,8 @@
             <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
               data-outline-chapter={ch.num}
-              class="bg-base-300 rounded-lg p-2.5 group cursor-pointer hover:ring-1 hover:ring-primary/40 transition-shadow"
-              on:click={() => startEdit(ch)}
+              class="bg-base-300 rounded-lg p-2.5 group {isOutlineEditable(ch.status) && !$taskRunning ? 'cursor-pointer hover:ring-1 hover:ring-primary/40' : ''} transition-shadow"
+              on:click={() => isOutlineEditable(ch.status) && !$taskRunning && startEdit(ch)}
             >
               <div class="flex items-center gap-2">
                 <span class="text-sm font-bold text-base-content/40 w-12 shrink-0">{ch.num}</span>
@@ -460,6 +507,15 @@
                   <span class="text-xs text-base-content/45 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">{$t('outline.chapter.previewTag')}</span>
                 {/if}
               </div>
+              {#if ch.characters?.length}
+                <div class="flex flex-wrap gap-1 mt-1.5 ml-14">
+                  {#each ch.characters as c}
+                    <span class="badge badge-ghost badge-xs gap-0.5" title={c.note || ''}>
+                      {c.name}{#if c.first_appearance}<span class="text-warning">*</span>{/if}
+                    </span>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -496,6 +552,11 @@
         <div class="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
           {#if canEditOutline}
             <textarea class="textarea textarea-sm h-full min-h-56 w-full resize-none text-sm leading-6" bind:value={editOutline} placeholder={$t('outline.chapter.outlinePlaceholder')}></textarea>
+            <div class="mt-3">
+              <span class="text-xs text-base-content/50 mb-1 block">{$t('outline.chapter.castLabel')}</span>
+              <textarea class="textarea textarea-sm w-full h-20 text-sm font-mono" bind:value={editCharactersText} placeholder={$t('outline.chapter.castPlaceholder')} disabled={$taskRunning}></textarea>
+              <p class="text-[11px] text-base-content/35 mt-0.5">{$t('outline.chapter.castHint')}</p>
+            </div>
           {:else}
             <div class="h-full min-h-56 whitespace-pre-wrap rounded-lg bg-base-200 p-3 text-sm leading-6">{editingChapter?.outline}</div>
             <p class="mt-2 text-xs text-base-content/50">{$t('outline.chapter.readonlyHint')}</p>
