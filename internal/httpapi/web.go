@@ -71,6 +71,7 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 	mux.HandleFunc("POST /api/arcs/append", h.PostArcAppend)
 	mux.HandleFunc("POST /api/book-overview/generate", h.PostBookOverviewGenerate)
 	mux.HandleFunc("POST /api/book-overview/confirm", h.PostBookOverviewConfirm)
+	mux.HandleFunc("PUT /api/book-overview", h.PutBookOverview)
 	mux.HandleFunc("PUT /api/arcs/{id}", h.PutArc)
 	mux.HandleFunc("POST /api/arcs/{id}/outline-confirm", h.PostArcOutlineConfirm)
 	mux.HandleFunc("PUT /api/arcs/{id}/acts/{aid}", h.PutAct)

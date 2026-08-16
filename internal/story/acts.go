@@ -227,6 +227,15 @@ func ConfirmBookOverviewAction(state *Progress, progressPath string) error {
 	return SaveProgress(progressPath, state)
 }
 
+// EditBookOverviewAction edits the 整书概览 text before it is confirmed.
+func EditBookOverviewAction(state *Progress, progressPath, outline string) error {
+	if state.BookOverviewConfirmed {
+		return fmt.Errorf("整书概览已确认，不能修改")
+	}
+	state.BookOverview = strings.TrimSpace(outline)
+	return SaveProgress(progressPath, state)
+}
+
 // —— 卷纲 (arc outline + act split) ——
 
 type arcPlanResponse struct {
@@ -349,21 +358,27 @@ func ConfirmArcOutlineAction(state *Progress, progressPath string, arcID int) er
 	return SaveProgress(progressPath, state)
 }
 
-// EditArcAction edits a volume's title/goal. Changing chapter_count is allowed
-// only before the volume's plan is locked (no acts, not confirmed); it
+// EditArcAction edits a volume's title/goal/outline. Changing chapter_count is
+// allowed only before the volume's plan is locked (no acts, not confirmed); it
 // recomputes all volume ranges to stay contiguous and updates the planned
-// chapter count.
-func EditArcAction(state *Progress, cfg *config.Config, cfgPath string, arcID int, title, goal string, chapterCount int) error {
+// chapter count. nil pointers keep the current value.
+func EditArcAction(state *Progress, cfg *config.Config, cfgPath string, arcID int, title, goal, outline *string, chapterCount int) error {
 	ai := ArcIndexByID(state, arcID)
 	if ai < 0 {
 		return fmt.Errorf("卷 %d 不存在", arcID)
 	}
 	arc := &state.Arcs[ai]
-	if strings.TrimSpace(title) != "" {
-		arc.Title = strings.TrimSpace(title)
+	if title != nil {
+		arc.Title = strings.TrimSpace(*title)
 	}
-	if strings.TrimSpace(goal) != "" {
-		arc.Goal = strings.TrimSpace(goal)
+	if goal != nil {
+		arc.Goal = strings.TrimSpace(*goal)
+	}
+	if outline != nil {
+		if arc.Confirmed {
+			return fmt.Errorf("第 %d 卷卷纲已确认，不能修改", ai+1)
+		}
+		arc.Outline = strings.TrimSpace(*outline)
 	}
 	if chapterCount > 0 {
 		if len(arc.Acts) > 0 || arc.Confirmed {
@@ -491,10 +506,11 @@ func ConfirmActOutlineAction(state *Progress, progressPath string, arcID, actID 
 	return SaveProgress(progressPath, state)
 }
 
-// EditActAction edits an act's title/goal. Changing chapter_count is allowed
-// only before the act is locked (not confirmed, no chapters generated); it
-// recomputes act ranges inside the volume to stay contiguous.
-func EditActAction(state *Progress, arcID, actID int, title, goal string, chapterCount int) error {
+// EditActAction edits an act's title/goal/outline. Changing chapter_count is
+// allowed only before the act is locked (not confirmed, no chapters generated);
+// it recomputes act ranges inside the volume to stay contiguous. nil pointers
+// keep the current value.
+func EditActAction(state *Progress, arcID, actID int, title, goal, outline *string, chapterCount int) error {
 	ai := ArcIndexByID(state, arcID)
 	if ai < 0 {
 		return fmt.Errorf("卷 %d 不存在", arcID)
@@ -505,11 +521,17 @@ func EditActAction(state *Progress, arcID, actID int, title, goal string, chapte
 		return fmt.Errorf("第 %d 卷不存在第 %d 幕", ai+1, actID)
 	}
 	act := &arc.Acts[ax]
-	if strings.TrimSpace(title) != "" {
-		act.Title = strings.TrimSpace(title)
+	if title != nil {
+		act.Title = strings.TrimSpace(*title)
 	}
-	if strings.TrimSpace(goal) != "" {
-		act.Goal = strings.TrimSpace(goal)
+	if goal != nil {
+		act.Goal = strings.TrimSpace(*goal)
+	}
+	if outline != nil {
+		if act.Confirmed {
+			return fmt.Errorf("第 %d 卷第 %d 幕幕纲已确认，不能修改", ai+1, ax+1)
+		}
+		act.Outline = strings.TrimSpace(*outline)
 	}
 	if chapterCount > 0 {
 		if act.Confirmed || act.ChaptersConfirmed || len(actChapters(state, act)) > 0 {

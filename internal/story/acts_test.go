@@ -205,7 +205,7 @@ func TestEditActRecomputesRanges(t *testing.T) {
 			}},
 		},
 	}
-	if err := EditActAction(state, 1, 1, "", "", 4); err != nil {
+	if err := EditActAction(state, 1, 1, nil, nil, nil, 4); err != nil {
 		t.Fatalf("edit act failed: %v", err)
 	}
 	acts := state.Arcs[0].Acts
@@ -220,7 +220,7 @@ func TestEditActRecomputesRanges(t *testing.T) {
 	state2 := &Progress{Arcs: []Arc{{ID: 1, StartCh: 1, EndCh: 6, Acts: []Act{
 		{ID: 1, StartCh: 1, EndCh: 2, Confirmed: true},
 	}}}}
-	if err := EditActAction(state2, 1, 1, "", "", 5); err == nil {
+	if err := EditActAction(state2, 1, 1, nil, nil, nil, 5); err == nil {
 		t.Fatal("expected error editing confirmed act")
 	}
 }
@@ -253,5 +253,42 @@ func TestConfirmActChaptersMovesPhaseToWriting(t *testing.T) {
 	}
 	if err := ConfirmActChaptersAction(state2, progressPath, 1, 1); err == nil {
 		t.Fatal("expected error when a chapter outline is missing")
+	}
+}
+
+func TestEditOutlineBeforeConfirm(t *testing.T) {
+	dir := t.TempDir()
+	progressPath := dir + "/progress.json"
+
+	// Arc outline editable before confirmation; blocked afterwards.
+	arc := "旧卷纲"
+	if err := EditArcAction(&Progress{Arcs: []Arc{{ID: 1, Title: "卷", Goal: "目标", Outline: arc}}}, nil, "", 1, nil, nil, &arc, 0); err != nil {
+		t.Fatalf("edit arc outline failed: %v", err)
+	}
+	confirmed := &Progress{Arcs: []Arc{{ID: 1, Confirmed: true, Outline: arc}}}
+	if err := EditArcAction(confirmed, nil, "", 1, nil, nil, &arc, 0); err == nil {
+		t.Fatal("expected error editing confirmed arc outline")
+	}
+
+	// Act outline editable before confirmation; blocked afterwards.
+	if err := EditActAction(&Progress{Arcs: []Arc{{ID: 1, Acts: []Act{{ID: 1, Title: "幕", Goal: "目标", Outline: arc}}}}}, 1, 1, nil, nil, &arc, 0); err != nil {
+		t.Fatalf("edit act outline failed: %v", err)
+	}
+	actConfirmed := &Progress{Arcs: []Arc{{ID: 1, Acts: []Act{{ID: 1, Confirmed: true, Outline: arc}}}}}
+	if err := EditActAction(actConfirmed, 1, 1, nil, nil, &arc, 0); err == nil {
+		t.Fatal("expected error editing confirmed act outline")
+	}
+
+	// Book overview editable before confirmation; blocked afterwards.
+	state := &Progress{BookOverview: "旧概览"}
+	if err := EditBookOverviewAction(state, progressPath, "新概览"); err != nil {
+		t.Fatalf("edit book overview failed: %v", err)
+	}
+	if state.BookOverview != "新概览" {
+		t.Fatalf("book overview not updated: %q", state.BookOverview)
+	}
+	confirmed2 := &Progress{BookOverview: "旧概览", BookOverviewConfirmed: true}
+	if err := EditBookOverviewAction(confirmed2, progressPath, "新概览"); err == nil {
+		t.Fatal("expected error editing confirmed book overview")
 	}
 }

@@ -3414,6 +3414,26 @@ func (h *Handlers) PostBookOverviewConfirm(w http.ResponseWriter, r *http.Reques
 	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
 }
 
+// PutBookOverview 编辑整书概览正文（确认前）。
+func (h *Handlers) PutBookOverview(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+	var body struct {
+		Outline string `json:"outline"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if err := story.EditBookOverviewAction(h.state, h.progressPath, body.Outline); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	h.writeJSON(w, http.StatusOK, story.ProgressView(h.state))
+}
+
 // PutArc 编辑卷的标题/目标/章数（修缮整书概览）。
 func (h *Handlers) PutArc(w http.ResponseWriter, r *http.Request) {
 	if h.isTaskRunning() {
@@ -3426,15 +3446,16 @@ func (h *Handlers) PutArc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Title        string `json:"title"`
-		Goal         string `json:"goal"`
-		ChapterCount int    `json:"chapter_count"`
+		Title        *string `json:"title"`
+		Goal         *string `json:"goal"`
+		Outline      *string `json:"outline"`
+		ChapterCount int     `json:"chapter_count"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
-	if err := story.EditArcAction(h.state, h.cfg, h.cfgPath, arcID, body.Title, body.Goal, body.ChapterCount); err != nil {
+	if err := story.EditArcAction(h.state, h.cfg, h.cfgPath, arcID, body.Title, body.Goal, body.Outline, body.ChapterCount); err != nil {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
@@ -3540,15 +3561,16 @@ func (h *Handlers) PutAct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Title        string `json:"title"`
-		Goal         string `json:"goal"`
-		ChapterCount int    `json:"chapter_count"`
+		Title        *string `json:"title"`
+		Goal         *string `json:"goal"`
+		Outline      *string `json:"outline"`
+		ChapterCount int     `json:"chapter_count"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
-	if err := story.EditActAction(h.state, arcID, actID, body.Title, body.Goal, body.ChapterCount); err != nil {
+	if err := story.EditActAction(h.state, arcID, actID, body.Title, body.Goal, body.Outline, body.ChapterCount); err != nil {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
