@@ -99,6 +99,14 @@ var errorCatalog = map[string]map[string]string{
 		LangZH: "缺少 content 字段",
 		LangEN: "content field is required",
 	},
+	"attachment_invalid": {
+		LangZH: "附件无效: %v",
+		LangEN: "Invalid attachment: %v",
+	},
+	"attachment_not_found": {
+		LangZH: "附件不存在",
+		LangEN: "Attachment not found",
+	},
 	"missing_fields": {
 		LangZH: "缺少 fields 字段",
 		LangEN: "fields array is required",

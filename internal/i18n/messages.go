@@ -720,6 +720,10 @@ var messageCatalog = map[string]map[string]string{
 		LangZH: "Agent API 调用失败: %v",
 		LangEN: "Agent API call failed: %v",
 	},
+	"agent.attachment_failed": {
+		LangZH: "读取聊天附件失败: %v",
+		LangEN: "Failed to read chat attachment: %v",
+	},
 	"agent.output_truncated": {
 		LangZH: "助理回复因输出 token 上限（max_tokens=%d）被截断，工具调用未完成。请在系统配置页增大 max_tokens，或缩短修改意见后点击「重试」重新发送。",
 		LangEN: "Assistant output was cut off at the max_tokens limit (%d). The tool call did not complete. Increase max_tokens on the System page, shorten your message, then click Retry to resend.",

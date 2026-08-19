@@ -34,15 +34,41 @@ type tokenUsage struct {
 
 type Message struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+// ContentPart is a multimodal content block (OpenAI-compatible). A Message with
+// attachments uses Content = []ContentPart; plain string messages stay strings.
+type ContentPart struct {
+	Type     string    `json:"type"` // "text" | "image_url"
+	Text     string    `json:"text,omitempty"`
+	ImageURL *imageURL `json:"image_url,omitempty"`
+}
+
+type imageURL struct {
+	URL string `json:"url"`
+}
+
+// ImageContentPart builds a base64 data-URL image block.
+func ImageContentPart(dataURL string) ContentPart {
+	return ContentPart{Type: "image_url", ImageURL: &imageURL{URL: dataURL}}
+}
+
+// TextContentPart builds a plain text block.
+func TextContentPart(text string) ContentPart {
+	return ContentPart{Type: "text", Text: text}
 }
 
 type ChatResponse struct {
 	Choices []struct {
-		Message      Message `json:"message"`
-		FinishReason string  `json:"finish_reason"`
+		Message      respMessage `json:"message"`
+		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *tokenUsage `json:"usage,omitempty"`
+}
+
+type respMessage struct {
+	Content string `json:"content"`
 }
 
 // CompletionResult is the normalized result of a chat completion call.

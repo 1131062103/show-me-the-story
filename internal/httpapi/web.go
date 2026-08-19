@@ -156,6 +156,7 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 	mux.HandleFunc("POST /api/chat/sessions", h.PostChatSession)
 	mux.HandleFunc("GET /api/chat/sessions/{id}", h.GetChatSession)
 	mux.HandleFunc("DELETE /api/chat/sessions/{id}", h.DeleteChatSession)
+	mux.HandleFunc("GET /api/chat/sessions/{id}/attachments/{file}", h.GetChatAttachment)
 	mux.HandleFunc("POST /api/chat/sessions/{id}/messages", h.PostChatMessage)
 
 	mux.HandleFunc("GET /api/events", h.SSEHandler)

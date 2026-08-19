@@ -21,6 +21,60 @@
   $: taskLogs = ($logEntries || []).slice(-20);
   let taskStatusCollapsed = false;
 
+  // 附件状态：待发送文件（name/type/data base64）+ 上次发送的附件（重试复用）
+  let pendingFiles = [];
+  let fileInputEl;
+  let lastSentAttachments = [];
+  const MAX_ATTACH_COUNT = 5;
+  const MAX_ATTACH_BYTES = 8 * 1024 * 1024;
+  const IMAGE_TYPE_RE = /^image\/(jpeg|png|gif|webp)$/;
+  const TEXT_TYPE_RE = /^text\/(plain|markdown)$/;
+
+  function isAllowedFile(file) {
+    if (IMAGE_TYPE_RE.test(file.type) || TEXT_TYPE_RE.test(file.type)) return true;
+    return /\.(txt|md)$/i.test(file.name);
+  }
+  function readFileAsBase64(file) {
+    return new Promise(resolve => {
+      const fr = new FileReader();
+      fr.onload = () => {
+        const s = fr.result || '';
+        resolve(s.includes(',') ? s.slice(s.indexOf(',') + 1) : s);
+      };
+      fr.onerror = () => resolve('');
+      fr.readAsDataURL(file);
+    });
+  }
+  async function pickFiles(e) {
+    const files = Array.from(e.target.files || []);
+    if (e.target) e.target.value = '';
+    for (const f of files) {
+      if (pendingFiles.length >= MAX_ATTACH_COUNT) {
+        addToast($t('chat.attach.tooMany', { n: MAX_ATTACH_COUNT }), 'error');
+        break;
+      }
+      if (f.size > MAX_ATTACH_BYTES) {
+        addToast($t('chat.attach.tooLarge', { name: f.name }), 'error');
+        continue;
+      }
+      if (!isAllowedFile(f)) {
+        addToast($t('chat.attach.unsupported', { name: f.name }), 'error');
+        continue;
+      }
+      const data = await readFileAsBase64(f);
+      if (!data) continue;
+      pendingFiles = [...pendingFiles, { name: f.name, type: f.type || 'application/octet-stream', data }];
+    }
+  }
+  function removePending(i) {
+    pendingFiles = pendingFiles.filter((_, j) => j !== i);
+  }
+  function attUrl(att) {
+    if (att.data) return 'data:' + (att.type || 'image/png') + ';base64,' + att.data;
+    const file = (att.path || '').split('/').pop();
+    return `/api/chat/sessions/${$currentChatSession?.id}/attachments/${file}`;
+  }
+
   const dangerTools = new Set(['delete_chapter', 'delete_chapters_from', 'delete_outline', 'reset_progress']);
 
   function toolLabel(name) {
@@ -174,14 +228,23 @@
     if (inputEl) inputEl.style.height = 'auto';
     autoScroll = true;
 
+    const attachments = pendingFiles.map(f => ({ name: f.name, type: f.type, data: f.data }));
+    pendingFiles = [];
+    lastSentAttachments = attachments;
+
     currentChatSession.update(s => {
       if (!s) return s;
-      const messages = [...(s.messages || []), { role: 'user', content: msg, timestamp: new Date().toISOString() }];
+      const messages = [...(s.messages || []), {
+        role: 'user',
+        content: msg,
+        attachments: attachments.map(a => ({ name: a.name, type: a.type, data: a.data, path: '' })),
+        timestamp: new Date().toISOString(),
+      }];
       return { ...s, messages, streaming_text: '', pending_tool_calls: [] };
     });
 
     try {
-      await api('POST', '/api/chat/sessions/' + $currentChatSession.id + '/messages', { content: msg, context_page: contextPage });
+      await api('POST', '/api/chat/sessions/' + $currentChatSession.id + '/messages', { content: msg, context_page: contextPage, attachments });
     } catch (e) { addToast(e.message, 'error'); }
   }
 
@@ -212,6 +275,7 @@
         const lastUserMsg = [...$currentChatSession.messages].reverse().find(m => m.role === 'user');
         if (lastUserMsg) {
           chatInput = lastUserMsg.content;
+          pendingFiles = lastSentAttachments;
           await sendMessage();
           return;
         }
@@ -332,6 +396,19 @@
       {#each msgs as m, msgIdx}
         {#if m.role === 'user'}
           <div class="chat chat-end">
+            {#if m.attachments?.length > 0}
+              <div class="chat-bubble chat-bubble-primary px-2 py-1.5 mb-1 flex flex-wrap gap-1.5 max-w-[85%]">
+                {#each m.attachments as att}
+                  {#if att.type?.startsWith('image/')}
+                    <a href={attUrl(att)} target="_blank" rel="noopener">
+                      <img src={attUrl(att)} alt={att.name} class="w-14 h-14 object-cover rounded border border-base-content/10" loading="lazy" />
+                    </a>
+                  {:else}
+                    <span class="text-xs text-base-content/80 flex items-center gap-1 max-w-[160px] truncate">📄 {att.name}</span>
+                  {/if}
+                {/each}
+              </div>
+            {/if}
             <div class="chat-bubble chat-bubble-primary text-sm whitespace-pre-wrap max-w-[85%]">{m.content}</div>
             <div class="chat-footer text-xs text-base-content/30 mt-0.5">{fmtTime(m.timestamp)}</div>
           </div>
@@ -438,17 +515,36 @@
 
   <!-- 输入区 -->
   {#if $currentChatSession}
-    <div class="border-t border-base-content/10 p-2 flex gap-2 items-end shrink-0">
-      <textarea
-        bind:this={inputEl}
-        class="textarea textarea-sm flex-1 min-h-[38px] max-h-[120px] resize-none text-base leading-relaxed"
-        bind:value={chatInput}
-        placeholder={$taskRunning ? $t('chat.input.placeholderBusy') : $t('chat.input.placeholder')}
-        on:keydown={handleKeydown}
-        on:input={autoGrow}
-        disabled={$taskRunning}
-      ></textarea>
-      <button class="btn btn-primary btn-sm" on:click={sendMessage} disabled={$taskRunning || !chatInput.trim()}>{$t('chat.input.send')}</button>
+    <div class="border-t border-base-content/10 p-2 shrink-0">
+      {#if pendingFiles.length > 0}
+        <div class="flex flex-wrap gap-1.5 pb-2">
+          {#each pendingFiles as f, i}
+            <div class="flex items-center gap-1 badge badge-ghost badge-sm px-2 max-w-[200px]">
+              {#if f.type?.startsWith('image/')}
+                <img src={'data:' + f.type + ';base64,' + f.data} alt={f.name} class="w-5 h-5 object-cover rounded shrink-0" />
+              {:else}
+                <span class="shrink-0">📄</span>
+              {/if}
+              <span class="truncate text-xs">{f.name}</span>
+              <button class="btn btn-xs btn-circle btn-ghost h-4 w-4 min-h-0 shrink-0" on:click={() => removePending(i)} title={$t('chat.attach.remove')}>✕</button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      <div class="flex gap-2 items-end">
+        <button class="btn btn-ghost btn-sm shrink-0" on:click={() => fileInputEl?.click()} disabled={$taskRunning || pendingFiles.length >= MAX_ATTACH_COUNT} title={$t('chat.attach.button')}>📎</button>
+        <input bind:this={fileInputEl} type="file" accept="image/*,.txt,.md,.markdown" multiple class="hidden" on:change={pickFiles} />
+        <textarea
+          bind:this={inputEl}
+          class="textarea textarea-sm flex-1 min-h-[38px] max-h-[120px] resize-none text-base leading-relaxed"
+          bind:value={chatInput}
+          placeholder={$taskRunning ? $t('chat.input.placeholderBusy') : $t('chat.input.placeholder')}
+          on:keydown={handleKeydown}
+          on:input={autoGrow}
+          disabled={$taskRunning}
+        ></textarea>
+        <button class="btn btn-primary btn-sm" on:click={sendMessage} disabled={$taskRunning || !chatInput.trim()}>{$t('chat.input.send')}</button>
+      </div>
     </div>
   {/if}
 </div>

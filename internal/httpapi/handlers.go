@@ -3028,6 +3028,39 @@ func (h *Handlers) GetChatSession(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, session)
 }
 
+func (h *Handlers) GetChatAttachment(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	file := r.PathValue("file")
+	if file == "" || filepath.Base(file) != file {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "attachment_not_found")
+		return
+	}
+	att := story.ChatAttachment{Name: file, Path: filepath.Join(id, "attachments", file)}
+	abs, err := story.ChatAttachmentAbsPath(h.sessionsDir, att)
+	if err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "attachment_not_found")
+		return
+	}
+	if _, err := os.Stat(abs); err != nil {
+		h.writeErrorReq(w, r, http.StatusNotFound, "attachment_not_found")
+		return
+	}
+	switch strings.ToLower(filepath.Ext(file)) {
+	case ".jpg", ".jpeg":
+		w.Header().Set("Content-Type", "image/jpeg")
+	case ".png":
+		w.Header().Set("Content-Type", "image/png")
+	case ".gif":
+		w.Header().Set("Content-Type", "image/gif")
+	case ".webp":
+		w.Header().Set("Content-Type", "image/webp")
+	default:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	http.ServeFile(w, r, abs)
+}
+
 func (h *Handlers) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	if h.rejectIfTaskRunning(w, r) {
 		return
@@ -3051,8 +3084,9 @@ func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
 	var req struct {
-		Content     string `json:"content"`
-		ContextPage string `json:"context_page"`
+		Content     string                        `json:"content"`
+		ContextPage string                        `json:"context_page"`
+		Attachments []story.ChatAttachmentInput   `json:"attachments"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" {
 		h.endTask()
@@ -3067,11 +3101,19 @@ func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	attachments, err := story.SaveChatAttachments(h.sessionsDir, sessionID, req.Attachments)
+	if err != nil {
+		h.endTask()
+		h.writeErrorReq(w, r, http.StatusBadRequest, "attachment_invalid", err.Error())
+		return
+	}
+
 	now := time.Now().Format(time.RFC3339)
 	session.Messages = append(session.Messages, story.ChatMessage{
-		Role:      "user",
-		Content:   req.Content,
-		Timestamp: now,
+		Role:        "user",
+		Content:     req.Content,
+		Attachments: attachments,
+		Timestamp:   now,
 	})
 
 	if len(session.Messages) == 1 {
@@ -3144,7 +3186,7 @@ func (h *Handlers) PostChatMessage(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 
-		reply, newHistory, err := agent.RunAgentLoop(ctx, agentCtx, req.Content, history, 30)
+		reply, newHistory, err := agent.RunAgentLoop(ctx, agentCtx, req.Content, history, 30, attachments)
 		if err != nil {
 			// 即使失败也保存已产生的对话步骤，避免上下文丢失
 			saveAgentSteps(session, newHistory[len(history):])

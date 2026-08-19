@@ -51,9 +51,31 @@ func TaskTokensFromContext(ctx context.Context) *TaskTokenUsage {
 func countMessageRunes(messages []Message) int {
 	n := 0
 	for _, m := range messages {
-		n += utf8.RuneCountInString(m.Content)
+		n += ContentRuneLen(m.Content)
 	}
 	return n
+}
+
+// ContentRuneLen approximates the rune length of a message content value
+// (string, or []ContentPart when attachments are attached). Images get a flat
+// nominal estimate since runes cannot represent pixels; the real count comes
+// from the API usage when available.
+func ContentRuneLen(content any) int {
+	switch v := content.(type) {
+	case string:
+		return utf8.RuneCountInString(v)
+	case []ContentPart:
+		n := 0
+		for _, p := range v {
+			n += utf8.RuneCountInString(p.Text)
+			if p.ImageURL != nil {
+				n += 500
+			}
+		}
+		return n
+	default:
+		return 0
+	}
 }
 
 func (t *TaskTokenUsage) beginCall(messages []Message) {

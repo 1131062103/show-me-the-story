@@ -51,7 +51,7 @@ type AgentStep struct {
 // ToolCall lives in story because persisted chat messages embed it.
 type ToolCall = story.ToolCall
 
-func RunAgentLoop(goCtx context.Context, ctx *AgentContext, userMessage string, history []AgentStep, maxSteps int) (string, []AgentStep, error) {
+func RunAgentLoop(goCtx context.Context, ctx *AgentContext, userMessage string, history []AgentStep, maxSteps int, attachments []story.ChatAttachment) (string, []AgentStep, error) {
 	tools := getBuiltinTools()
 	toolDesc := buildToolDescriptions(tools)
 
@@ -94,7 +94,15 @@ func RunAgentLoop(goCtx context.Context, ctx *AgentContext, userMessage string, 
 		}
 	}
 
-	messages = append(messages, llm.Message{Role: "user", Content: userMessage})
+	var userContent any = userMessage
+	if len(attachments) > 0 {
+		parts, err := story.BuildAttachmentContentParts(ctx.SessionsDir, attachments)
+		if err != nil {
+			return "", history, agentErr(ctx, "agent.attachment_failed", err.Error())
+		}
+		userContent = append([]llm.ContentPart{llm.TextContentPart(userMessage)}, parts...)
+	}
+	messages = append(messages, llm.Message{Role: "user", Content: userContent})
 
 	// ponytail: one parse-retry per loop; ceiling = still-broken after retry → hard error (no silent final reply).
 	parseRetryUsed := false
@@ -107,7 +115,7 @@ func RunAgentLoop(goCtx context.Context, ctx *AgentContext, userMessage string, 
 		if ctx.Logger != nil {
 			var roleSeq []string
 			for _, m := range messages {
-				roleSeq = append(roleSeq, fmt.Sprintf("%s(%d)", m.Role, len([]rune(m.Content))))
+				roleSeq = append(roleSeq, fmt.Sprintf("%s(%d)", m.Role, llm.ContentRuneLen(m.Content)))
 			}
 			ctx.Logger.Info(fmt.Sprintf("[Agent] 步骤 %d/%d: 消息 %d 条: %v", step+1, maxSteps, len(messages), roleSeq))
 		}

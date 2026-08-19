@@ -24,13 +24,23 @@ type ToolCall struct {
 }
 
 type ChatMessage struct {
-	Role           string     `json:"role"`
-	Content        string     `json:"content"`
-	ToolCalls      []ToolCall `json:"tool_calls,omitempty"`
-	ToolResult     string     `json:"tool_result,omitempty"`
-	ToolResultKey  string     `json:"tool_result_key,omitempty"`
-	ToolResultArgs []string   `json:"tool_result_args,omitempty"`
-	Timestamp      string     `json:"timestamp"`
+	Role           string           `json:"role"`
+	Content        string           `json:"content"`
+	Attachments    []ChatAttachment `json:"attachments,omitempty"`
+	ToolCalls      []ToolCall       `json:"tool_calls,omitempty"`
+	ToolResult     string           `json:"tool_result,omitempty"`
+	ToolResultKey  string           `json:"tool_result_key,omitempty"`
+	ToolResultArgs []string         `json:"tool_result_args,omitempty"`
+	Timestamp      string           `json:"timestamp"`
+}
+
+// ChatAttachment is a persisted reference to a file attached to a user chat
+// message. The actual bytes live under sessions/{sessionID}/attachments/;
+// Path is relative to the sessions dir.
+type ChatAttachment struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Path string `json:"path"`
 }
 
 type ChatSessionIndex struct {
@@ -139,6 +149,10 @@ func DeleteChatSession(baseDir, id string) error {
 
 	idx, err := LoadChatSessions(baseDir)
 	if err != nil {
+		return err
+	}
+
+	if err := DeleteSessionAttachments(baseDir, id); err != nil {
 		return err
 	}
 
