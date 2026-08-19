@@ -55,7 +55,7 @@ func RunAgentLoop(goCtx context.Context, ctx *AgentContext, userMessage string, 
 	tools := getBuiltinTools()
 	toolDesc := buildToolDescriptions(tools)
 
-	systemPrompt := buildAgentSystemPrompt(ctx, toolDesc)
+	systemPrompt := buildAgentSystemPrompt(ctx, toolDesc, userMessage)
 
 	var messages []llm.Message
 	messages = append(messages, llm.Message{Role: "system", Content: systemPrompt})
@@ -293,11 +293,11 @@ func toolCallParseRetryFeedback(ctx *AgentContext, finishReason, content string)
 	return i18n.T(lang, "agent.tool_call_parse_retry_hint", reason, agentEffectiveMaxTokens(ctx.APICfg))
 }
 
-func buildAgentSystemPrompt(ctx *AgentContext, toolDesc string) string {
+func buildAgentSystemPrompt(ctx *AgentContext, toolDesc, userMessage string) string {
 	if i18n.NormalizeLanguage(ctx.Config.Language) == i18n.LangEN {
-		return buildAgentSystemPromptEN(ctx, toolDesc)
+		return buildAgentSystemPromptEN(ctx, toolDesc, userMessage)
 	}
-	return buildAgentSystemPromptZH(ctx, toolDesc)
+	return buildAgentSystemPromptZH(ctx, toolDesc, userMessage)
 }
 
 // calcSynopsisLengthRange returns recommended synopsis length bounds (characters)
@@ -327,7 +327,7 @@ func calcSynopsisLengthRange(chapterCount, targetWordsPerChapter int) (minLen, m
 	return minLen, maxLen
 }
 
-func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
+func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc, userMessage string) string {
 	var sb strings.Builder
 	sb.WriteString("你是一个小说创作助手，全权负责管理小说项目的一切操作，包括：生成/修订/确认大纲、生成/修订/确认章节、管理角色/世界观/组织/关系/伏笔、技能管理、项目配置等。\n\n")
 
@@ -370,10 +370,20 @@ func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
 
 	sb.WriteString("\n")
 
-	enabledSkills := story.GetEnabledSkills(ctx.Skills, ctx.Config.SkillConfig)
+	enabledSkills := story.GetEnabledSkillsBySource(ctx.Skills, ctx.Config.SkillConfig, "builtin", "project")
 	if len(enabledSkills) > 0 {
 		sb.WriteString("## 已启用技能\n")
 		sb.WriteString(story.FormatSkillsContent(enabledSkills))
+		sb.WriteString("\n")
+	}
+
+	matchedExternal := story.FilterSkillsByMessage(
+		story.GetEnabledSkillsBySource(ctx.Skills, ctx.Config.SkillConfig, story.SkillSourceExternal),
+		userMessage,
+	)
+	if len(matchedExternal) > 0 {
+		sb.WriteString("## 已匹配的外置技能\n")
+		sb.WriteString(story.FormatSkillsContent(matchedExternal))
 		sb.WriteString("\n")
 	}
 
@@ -433,7 +443,7 @@ func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
 	return sb.String()
 }
 
-func buildAgentSystemPromptEN(ctx *AgentContext, toolDesc string) string {
+func buildAgentSystemPromptEN(ctx *AgentContext, toolDesc, userMessage string) string {
 	var sb strings.Builder
 	sb.WriteString("You are a novel-writing assistant in full charge of every operation on the project: generating/revising/confirming outlines, generating/revising/confirming chapters, managing characters/worldview/organisations/relations/foreshadows, skill management, project configuration, and so on. Reply to the user in English.\n\n")
 
@@ -476,10 +486,20 @@ func buildAgentSystemPromptEN(ctx *AgentContext, toolDesc string) string {
 
 	sb.WriteString("\n")
 
-	enabledSkills := story.GetEnabledSkills(ctx.Skills, ctx.Config.SkillConfig)
+	enabledSkills := story.GetEnabledSkillsBySource(ctx.Skills, ctx.Config.SkillConfig, "builtin", "project")
 	if len(enabledSkills) > 0 {
 		sb.WriteString("## Enabled skills\n")
 		sb.WriteString(story.FormatSkillsContent(enabledSkills))
+		sb.WriteString("\n")
+	}
+
+	matchedExternal := story.FilterSkillsByMessage(
+		story.GetEnabledSkillsBySource(ctx.Skills, ctx.Config.SkillConfig, story.SkillSourceExternal),
+		userMessage,
+	)
+	if len(matchedExternal) > 0 {
+		sb.WriteString("## Matched external skills\n")
+		sb.WriteString(story.FormatSkillsContent(matchedExternal))
 		sb.WriteString("\n")
 	}
 

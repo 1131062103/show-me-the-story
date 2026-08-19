@@ -66,9 +66,9 @@ jobs:
             GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "$out" .
             name="show-me-the-story-${GITHUB_REF_NAME}-${goos}-${goarch}"
             if [ "$goos" = "windows" ]; then
-              zip -q "release/${name}.zip" "$out"
+              zip -qr "release/${name}.zip" "$out" skills
             else
-              tar -czf "release/${name}.tar.gz" "$out"
+              tar -czf "release/${name}.tar.gz" "$out" skills
             fi
             rm -f "$out"
           done

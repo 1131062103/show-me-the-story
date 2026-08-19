@@ -872,7 +872,11 @@ export default {
 
   // ---- Skills page ----
   'skills.title': 'Skills',
-  'skills.intro': 'Skills are optional writing aids. When enabled, the assistant references them; the de-slop feature requires a polish-type skill.',
+  'skills.intro': 'Skills are optional writing aids. When enabled, built-in skills are injected into the assistant; the de-slop feature requires a polish-type skill. External skills activate automatically when mentioned in conversation.',
+  'skills.section.builtin': 'Built-in skills',
+  'skills.section.external': 'External skills',
+  'skills.external.hint': 'External skills use the standard Markdown format (frontmatter with name / description, optional lang). Drop .md files into the skills/ folder next to the program directory; their contents are not synced to the repository.',
+  'skills.external.empty': 'No external skills. Drop .md skill files into the skills/ folder next to the program directory, then reselect the project to see them.',
   'skills.col.name': 'Name',
   'skills.col.category': 'Category',
   'skills.col.description': 'Description',

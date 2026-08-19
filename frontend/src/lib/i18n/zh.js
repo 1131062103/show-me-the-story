@@ -876,7 +876,11 @@ export default {
 
   // ---- Skills page ----
   'skills.title': '技能管理',
-  'skills.intro': '技能是可选的创作辅助工具。启用后，全局助理会参考这些技能，去AI味功能需要启用 polish 类技能。',
+  'skills.intro': '技能是可选的创作辅助工具。启用后，内置技能会注入全局助理，去AI味功能需要启用 polish 类技能；外置技能在对话中提到时自动启用。',
+  'skills.section.builtin': '内置技能',
+  'skills.section.external': '外置技能',
+  'skills.external.hint': '外置技能使用标准 Markdown 格式（frontmatter 含 name / description，可选 lang），将 .md 文件放入程序目录的 skills/ 文件夹即可，内容不会被同步到仓库。',
+  'skills.external.empty': '暂无外置技能，把 .md 技能文件放进程序目录 skills/ 文件夹后重新选择项目即可显示',
   'skills.col.name': '名称',
   'skills.col.category': '分类',
   'skills.col.description': '描述',

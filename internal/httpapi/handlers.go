@@ -147,7 +147,7 @@ func (h *Handlers) switchProject(name string) error {
 		return fmt.Errorf("加载项目设定失败: %w", err)
 	}
 
-	skills := story.LoadAllSkills(cfg, projectDir)
+	skills := story.LoadAllSkills(cfg, h.progDir, projectDir)
 
 	postprocessPath := filepath.Join(projectDir, "postprocess.json")
 	postprocess, err := story.LoadPostProcess(postprocessPath)

@@ -42,7 +42,7 @@ task dev                              # 编译并启动 Go 后端
 Go 代码按依赖层次拆分为 `internal/` 下的单向依赖包（上层可依赖下层，反向禁止）：
 
 ```
-main.go                      入口：progDir 解析、api.json 加载、//go:embed frontend/dist、组装 httpapi
+main.go                      入口：progDir 解析、api.json 加载、//go:embed frontend/dist、创建 `storys/` 与 `skills/` 目录、组装 httpapi
 └── internal/
     ├── httpapi/             HTTP 层：web.go 路由注册 + handlers.go 全部 handler、任务互斥、SSE 端点
     ├── agent/               Agent Loop 引擎 + 内置工具集（全局助理用）
@@ -102,20 +102,20 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 | `internal/story/reconcile.go` | `ReconcileSettingsAction`（保持用户提交的 `newSettings`，AI 调整差异写入 pending 提案）、`regeneratePendingOutlines`、设定协调逻辑 |
 | `internal/story/config_guard.go` | `ConfigFieldChange`/`PendingConfigChanges` 结构体，`CollectStoryConfigConflicts`、`applyStoryConfigMerge`、`applyOutlineMetaWithGuard`、`Load/SavePendingConfigChanges`（`pending_config_changes.json`）、`ApplySelectedPendingChanges`、`SyncProgressMetaFromStory` |
 | `internal/story/settings.go` | `Character`、`WorldviewEntry`、`Organization`、`Relation`、`ProjectSettings` 结构体（含 `NextCharacterID` 等 ID 分配；角色/世界观/组织含可选 `Acts []int` 按幕归属过滤），`LoadProjectSettings`、`SaveProjectSettings` |
-| `internal/story/skills.go` | `Skill`（含 `Lang` 字段）结构体（`SkillConfig` 在 `internal/config`），`LoadBuiltinSkills`、`LoadProjectSkills`、`MergeSkills`、`GetEnabledSkills`、`GetEnabledSkillsByCategory`、`FilterSkillsByLang(skills, projectLang)`、`FormatSkillsContent`（按 skill 语言选择双语 header）、`//go:embed embeds/skills` |
+| `internal/story/skills.go` | `Skill`（含 `Lang` 字段）结构体（`SkillConfig` 在 `internal/config`），`LoadBuiltinSkills`、`LoadProjectSkills`、`LoadExternalSkills(progDir)`（从程序目录 `skills/` 加载**标准格式**外置技能，id 自动加 `ext.` 前缀，无显式 id 用文件名兜底）、`MergeSkills`、`GetEnabledSkillsByCategory`、`GetEnabledSkillsBySource`、`FilterSkillsByLang(skills, projectLang)`、`SkillMatchesMessage`/`FilterSkillsByMessage`（外置技能按当前用户消息提及匹配，供 Agent 按需注入）、`FormatSkillsContent`（按 skill 语言选择双语 header）、`//go:embed embeds/skills` |
 | `internal/story/editing.go` | `EditChapterContent` 章节正文局部编辑（`replace_lines`/`replace_text`/`insert_after_line`/`append`），`EditChapterContentRequest` 结构体，`EditOp` 常量，`FindChapterIdx` 辅助函数 |
 | `internal/story/chat.go` | `ChatSession`、`ChatMessage`（含 `tool_result_key`/`tool_result_args`、`Attachments []ChatAttachment` 附件引用）、`ToolCall`、`ChatSessionIndex` 结构体，Load/Save/Delete、`ChatSessionsDir`/`GenerateSessionID`/`GenerateChatTitle` |
 | `internal/story/chat_attachments.go` | 聊天附件：`ChatAttachment`（持久化引用 `{name,type,path}`，path 相对 sessions 目录）、`ChatAttachmentInput`（POST 请求 base64 输入）、`SaveChatAttachments`（类型白名单 图片/纯文本 + 单文件≤8MB + 每次≤5 个 + 总量≤20MB，落盘 `sessions/{id}/attachments/`）、`ChatAttachmentAbsPath`（路径穿越防护，要求 `{sessionID}/attachments/{file}` 三段结构）、`BuildAttachmentContentParts`（读取附件组装 `[]llm.ContentPart`：图片 → base64 data URL 的 image_url 块，文本 → 截断 2 万字注入 text 块）、`DeleteSessionAttachments`（删会话时清理） |
 | `internal/story/postprocess.go` | `PostProcessState`/`RoadmapItem` 结构体（含 `author_requirements` 全书优化补充要求）、`LoadPostProcess`/`SavePostProcess`（`postprocess.json`）、`buildPostProcessBundle`（设定+摘要+全文组装与长文策略）、`DiagnoseBookAction`、`ConsistencyCheckBookAction`（超长书按卷分段）、`BuildRoadmapAction`（注入 `{{.AuthorRequirements}}`）、`FullPostProcessAnalyzeAction`（诊断→核查→路线图）、`planExecuteBatches`（有补充要求时覆盖全书各章并与勾选工单合并为一次修订；否则仅勾选工单）、`ExecuteRoadmapAction`（可选前置衔接优化 + 按批定向修订/润色 + diff 节选）、`IsBookFullyAccepted` |
 | `internal/story/inject.go` | 注入块的双语版本：`buildOutlineConstraintsForLang`（有卷摘要的已完结卷压缩为一行卷摘要）、`buildPreviousChapterTailForLang`、`buildHistorySummaryForLang`、`buildCharacterContextForLang`、`buildWorldviewContextForLang`（按幕过滤：整书概览项目下注入 `actIDForChapter` 计算的目标章幕序号，仅注入匹配幕的角色/世界观/组织，`Acts` 为空视为全局；`actID=0` 时不过滤）、`formatActiveForeshadowsForChapterLang`、`formatChapterLine`、`formatForeshadowsForPromptLang`、`buildMemoryForLang`（叙事记忆注入）、`extractSnippet`（按段落位置截取原文片段）、`formatMemoryForUpdatePrompt` |
 | `internal/story/*_test.go` | 领域层单测：存储 roundtrip/脏检查/孤儿清理、Block ID 稳定性与 CRUD、卷区间换算与上下文压缩、导入切章/断点、引用式段落修订、字数区间、删章目标解析等 |
-| `internal/agent/agent.go` | `Tool`、`AgentContext`、`AgentStep` 结构体（`ToolCall` 别名指向 `story.ToolCall`），`RunAgentLoop(goCtx, ctx, userMessage, history, maxSteps, attachments)`（多轮消息历史 + 双语 tool 结果标签；当前用户消息带附件时经 `story.BuildAttachmentContentParts` 组装为多部分 `llm.Content`）、工具调用解析（`llm.ExtractJSON` 字符串感知；未闭合/解析失败时注入诊断提示让模型重试一次，仍失败则 `agent.output_truncated` / `agent.tool_call_parse_failed`，不修复截断 JSON）、内置工具集（读/写角色/世界观/章节等）、`buildAgentSystemPromptZH`/`buildAgentSystemPromptEN`、`update_project_config` 覆盖已填字段需 `confirm_overwrite: true`、`requireConfirm`（破坏性工具需 `confirm: true`）；文件内含原 `agent_i18n.go` 的 `agentMsg`/`agentErr` i18n 辅助 |
+| `internal/agent/agent.go` | `Tool`、`AgentContext`、`AgentStep` 结构体（`ToolCall` 别名指向 `story.ToolCall`），`RunAgentLoop(goCtx, ctx, userMessage, history, maxSteps, attachments)`（多轮消息历史 + 双语 tool 结果标签；当前用户消息带附件时经 `story.BuildAttachmentContentParts` 组装为多部分 `llm.Content`）、工具调用解析（`llm.ExtractJSON` 字符串感知；未闭合/解析失败时注入诊断提示让模型重试一次，仍失败则 `agent.output_truncated` / `agent.tool_call_parse_failed`，不修复截断 JSON）、内置工具集（读/写角色/世界观/章节等）、`buildAgentSystemPromptZH`/`buildAgentSystemPromptEN`（接受 `userMessage`：内置/项目技能启用即全量注入，外置技能经 `FilterSkillsByMessage` 按消息提及匹配后注入）、`update_project_config` 覆盖已填字段需 `confirm_overwrite: true`、`requireConfirm`（破坏性工具需 `confirm: true`）；文件内含原 `agent_i18n.go` 的 `agentMsg`/`agentErr` i18n 辅助 |
 | `internal/agent/agent_truncated_test.go` | Agent 工具调用解析单元测试：截断不修复、`ExtractJSON` 字符串感知、失败尝试识别、解析重试反馈、`finish_reason` 截断检测 |
 | `internal/httpapi/handlers.go` | `Handlers` 结构体（含 API 多配置存储 `apiProfiles`/`apiCfg`（激活 profile）、项目管理字段 `progDir`/`projectName`/`projectMu`、自动确认开关 `autoConfirm`、`postprocess`/`postprocessPath`）、`projectDir()` 帮助函数、项目切换 `switchProject()`、`ensureProject()` 检查、`rejectIfTaskRunning()`（任务运行期间编辑类端点返回 409）、`writeErrorReq` 本地化错误响应、API 多配置 handler（`GetAPIProfiles`/`PostAPIProfile`/`PutAPIProfile`/`DeleteAPIProfile`/`PostAPIProfileSelect`/`GetAPIModels`）、所有 HTTP handler（块编辑/卷/导入/全书优化/自动确认等）、`PostChapterGenerate` 自动确认循环、`tryStartTask`/`endTask`/`startChildWork` 互斥、项目管理 handler、`GetVersion` |
 | `internal/httpapi/project_compat.go` | 项目格式只读检测：新工程以 `config.json.project_format_version=3` 为契约；旧版内嵌章节正文或未识别布局标记为不兼容。选择前拒绝，保证不会创建目录或写回配置；无标记但完整 v3 分章布局可作为历史 v3 项目兼容打开并补写标记 |
 | `internal/httpapi/web.go` | 路由注册（含项目管理端点、API 多配置与模型拉取端点 `/api/config/api/profiles*`/`/api/config/api/models`、`/api/autoconfirm`、`/api/version`）、CORS/日志中间件、静态文件服务（`StartWebServer` 接收 main 传入的 `fs.FS`） |
 | `internal/story/embeds/skills/*.md` | 内置 Skill 文件（YAML frontmatter `lang: zh|en` + prompt body），通过 `//go:embed` 嵌入；中文：`humanizer-zh.md` / `story-deslop.md` / `writing-craft.md`；英文：`humanizer-en.md` / `story-deslop-en.md` / `writing-craft-en.md` |
-| `.github/workflows/release.yml` | GitHub Actions 发布流程：推送 `v*` tag 时校验 tag 在 main 分支上，构建前端 + 交叉编译 5 个目标（linux/windows/macOS × amd64/arm64，windows 仅 amd64），打包 tar.gz/zip 并用 `gh` 创建 Release；通过 `-ldflags "-X main.version=${GITHUB_REF_NAME}"` 注入版本号 |
+| `.github/workflows/release.yml` | GitHub Actions 发布流程：推送 `v*` tag 时校验 tag 在 main 分支上，构建前端 + 交叉编译 5 个目标（linux/windows/macOS × amd64/arm64，windows 仅 amd64），打包 tar.gz/zip（含 `skills/` 空目录）并用 `gh` 创建 Release；通过 `-ldflags "-X main.version=${GITHUB_REF_NAME}"` 注入版本号 |
 
 ### 前端文件（`frontend/`）
 
@@ -151,7 +151,7 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 | `src/lib/forceGraphLayout.js` | 图谱布局纯函数：`layoutParams(n)`（√N 间距/斥力）、`fitTransform`（包围盒适配视口）、`kineticEnergy`；`forceGraphLayout.check.js` 自检 |
 | `src/pages/Relations.svelte` | 图谱页：Canvas 力导向图谱（ForceGraph），无画布硬夹边、α 冷却后 fit-to-view、按节点数 √N 调间距；拖拽唤醒仿真；滚轮缩放 0.15x–3x（以光标为中心）；hover 高亮（强调 hover 节点与其连线，次强调直接相邻节点，其余淡化） |
 | `src/pages/Assistant.svelte` | 助理页：聊天会话列表 + 消息区 + 工具调用卡片 + 流式回复 |
-| `src/pages/Skills.svelte` | 技能页：技能表格 + toggle 开关 |
+| `src/pages/Skills.svelte` | 技能页：内置技能表格（名称/分类/描述/来源/开关）+ 外置技能分栏表格（名称/描述/开关，无分类列）+ 外置技能目录提示 |
 | `src/components/ChatPanel.svelte` | 右侧聊天面板；**附件功能**：输入区 📎 选文件（图片 jpg/png/gif/webp + 纯文本 txt/md，≤5 个、单文件≤8MB），选中的文件以 chip（图片缩略图）显示在输入框上方可移除，发送时经 base64 随 POST 一并上传；用户气泡在文字上方渲染附件（图片缩略图可点击放大，文本显示文件名），乐观渲染用本地 data URL、服务端确认后换成 `/api/chat/sessions/{id}/attachments/{file}` 引用；重试时复用上次发送的附件；任务日志走 `formatLogEntry`；工具结果走 `formatToolResult`；其余同前 |
 | `src/components/ConfirmModal.svelte` | 全局确认弹窗组件（替代浏览器 confirm） |
 | `src/components/LogPanel.svelte` | 底部可折叠实时日志面板 |
@@ -160,7 +160,7 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 
 ### 项目目录化
 
-`main.go` 接受命令行参数 `os.Args[1]` 作为程序基础目录（`progDir`），默认为当前目录。在 `progDir` 下自动创建 `storys/` 目录，每个故事项目是 `storys/{projectName}/` 子目录。`api.json` 始终在 `progDir` 下（全局共享，v3+ 为多配置存储：`{profiles: {name: APIConfig}, active: name}`，旧版单配置自动迁移为 `default` profile）。所有项目文件（`progress.json`、`config.json`、`settings.json`、`sessions/`）都在各自项目目录中。新建 v3 项目会在 `config.json` 写入 `project_format_version: 3`；项目列表只读检查此标记，旧版内嵌正文格式和未识别格式显示为不兼容且无法选择，避免 v3 重写旧工程。
+`main.go` 接受命令行参数 `os.Args[1]` 作为程序基础目录（`progDir`），默认为当前目录。在 `progDir` 下自动创建 `storys/`（项目）与 `skills/`（外置技能）目录，每个故事项目是 `storys/{projectName}/` 子目录。`api.json` 始终在 `progDir` 下（全局共享，v3+ 为多配置存储：`{profiles: {name: APIConfig}, active: name}`，旧版单配置自动迁移为 `default` profile）。所有项目文件（`progress.json`、`config.json`、`settings.json`、`sessions/`）都在各自项目目录中。新建 v3 项目会在 `config.json` 写入 `project_format_version: 3`；项目列表只读检查此标记，旧版内嵌正文格式和未识别格式显示为不兼容且无法选择，避免 v3 重写旧工程。
 
 启动时不绑定具体项目，前端显示项目选择页面。用户选择/创建项目后，后端通过 `switchProject()` 加载对应项目的全部数据。
 
@@ -249,12 +249,33 @@ API 配置（`APIConfig`）与故事配置（`Config`）完全分离，分别保
 
 ### Skill 可选性设计
 
-所有 skill 默认 `enabled: false`，配置存储在 `config.json` 的 `skill_config` 中。功能性 AI（大纲/章节/核查）默认不注入任何 skill。作者在前端 Skill 管理页手动 toggle 启用。
+所有 skill 默认 `enabled: false`，配置存储在 `config.json` 的 `skill_config` 中（key 为技能 id）。功能性 AI（大纲/章节/核查）默认不注入任何 skill。作者在前端 Skill 管理页手动 toggle 启用。
 
 注入规则：
 - 大纲生成/章节写作/修订/事实核查/AI设定生成：不注入任何 skill（除非作者显式启用）
-- 去AI味（`POST /api/chapter/polish`）：加载所有 enabled 的 `polish` 类 skill；全书优化执行时可选附加去 AI 味
-- 全局助理：加载所有 enabled 的 skill 作为参考
+- 去AI味（`POST /api/chapter/polish`）：加载所有 enabled 的 `polish` 类 skill（仅内置/项目技能有 category；外置技能无 category 不参与）；全书优化执行时可选附加去 AI 味
+- 全局助理：内置/项目技能**启用即全量注入**；外置技能**按消息提及匹配注入**（`FilterSkillsByMessage`：名字全文命中，或名字/简介中的显著 token 与消息重叠 ≥ 2）
+
+### 外置技能（标准协议）
+
+`progDir/skills/` 下的 `.md` 文件为外置技能，面向第三方开发者自行添加，走**标准 Markdown 协议**（与 Code Agent 技能一致），与内置技能完全隔离：
+
+```markdown
+---
+name: 爽文节奏
+description: 适用于都市玄幻题材的节奏控制技巧
+lang: zh        # 可选，不写=语言无关
+---
+（正文即给 AI 的指令文本）
+```
+
+- **无任何额外要求**：没有 category、没有能力声明、不产生按钮，只服务对话。去AI味等内置操作不感知外置技能
+- **ID 隔离**：加载时自动给外置技能 id 加 `ext.` 前缀（`ExternalSkillIDPrefix`），无显式 id 用文件名兜底；`config.json` 的开关 key 也是 `ext.xxx`，与内置/项目技能永不冲突
+- **按需注入**：外置技能不随启用量全量注入，而是框架层拿当前用户消息做关键词匹配（`SkillMatchesMessage`），命中才把全文注入该轮 system prompt；匹配逻辑在框架侧（正则 + CJK bigram），不依赖 AI 判断
+- **启用状态**：存各项目 `config.json`（`SkillConfig.EnabledSkills`，key 带 `ext.`），每个项目可独立开关；允许只启用外置技能
+- **仓库**：仓库提交 `skills/.gitkeep` 占位，目录内容被 `.gitignore` 忽略；发布包（tar.gz/zip）包含空 `skills/` 目录便于使用者发现
+
+内置技能行为（category 触发去AI按钮等）不受外置技能任何影响。
 
 ### 用户已填配置保护（无字段锁）
 
@@ -724,7 +745,7 @@ API 配置保存 `api.json`，故事配置保存 `config.json`。设定保存 `s
 | `internal/story/embeds/skills/story-deslop-en.md` | `story-deslop-en` | en | polish | 6-Gate 英文检测：slop-word 密度（per 1000 words）/英文陈词/em-dash & 三联结构/语音差异/emotion-by-body/节奏与开篇结尾，按英文 trade fiction 基线 |
 | `internal/story/embeds/skills/writing-craft-en.md` | `writing-craft-en` | en | writing | 章首钩子 7 式 + 章尾钩子 13 式 + Sanderson 的 promise/progress/payoff + Swain scene-and-sequel 节奏 + 对话经济 + 角色 voice + 按场景类型节奏表（英文 trade fiction 范式，非"爽点"框架） |
 
-Skill 文件格式：YAML frontmatter（`---` 分隔，含 `lang: zh|en`，无 `lang` 视为语言无关）+ Markdown body。`LoadAllSkills` 通过 `FilterSkillsByLang` 按 `cfg.Language` 过滤可见 skill。前端通过 `GET /api/skills` 获取列表，`PUT /api/skills/{id}/toggle` 切换启用状态。
+Skill 文件格式：YAML frontmatter（`---` 分隔，含 `lang: zh|en`，无 `lang` 视为语言无关）+ Markdown body。`LoadAllSkills(cfg, progDir, projectDir)` 合并内置 + 项目 + 外置技能，经 `FilterSkillsByLang` 按 `cfg.Language` 过滤可见 skill。前端通过 `GET /api/skills` 获取列表，`PUT /api/skills/{id}/toggle` 切换启用状态（外置技能 id 带 `ext.` 前缀）。
 
 **英文 skill 是本地化设计而非中文翻译**：英文 LLM 的 AI 痕迹（delve / tapestry / em-dash 泛滥 / said-bookisms / "in a world where" 等）与中文 LLM 的痕迹（宛如 / 不禁 / 微微 / 缓缓 / 心中暗道 等）不同；写作技法框架也按英文 trade fiction 约定（Sanderson、Swain）而非中文网文的爽点密度。
 

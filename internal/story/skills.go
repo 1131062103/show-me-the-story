@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"showmethestory/internal/config"
 	"showmethestory/internal/i18n"
 	"strings"
@@ -12,6 +13,13 @@ import (
 
 //go:embed embeds/skills
 var builtinSkillFiles embed.FS
+
+// SkillSourceExternal marks skills loaded from the program-level skills/ dir.
+const SkillSourceExternal = "external"
+
+// ExternalSkillIDPrefix prefixes external skill IDs to keep them in a separate
+// key space from builtin/project skills (enabled state is keyed by ID).
+const ExternalSkillIDPrefix = "ext."
 
 type Skill struct {
 	ID          string `json:"id"`
@@ -44,7 +52,7 @@ func LoadBuiltinSkills() []Skill {
 			continue
 		}
 
-		skill, err := parseSkillFile(string(data), "builtin")
+		skill, err := parseSkillFile(string(data), "builtin", "")
 		if err != nil {
 			fmt.Printf(" [警告] 解析内置技能文件 %s 失败: %v\n", entry.Name(), err)
 			continue
@@ -78,7 +86,7 @@ func LoadProjectSkills(dir string) []Skill {
 			continue
 		}
 
-		skill, err := parseSkillFile(string(data), "project")
+		skill, err := parseSkillFile(string(data), "project", "")
 		if err != nil {
 			continue
 		}
@@ -89,7 +97,48 @@ func LoadProjectSkills(dir string) []Skill {
 	return skills
 }
 
-func parseSkillFile(content string, source string) (Skill, error) {
+// LoadExternalSkills loads standard-format skills from the program-level
+// skills/ dir (progDir/skills). Format follows the plain markdown convention:
+// frontmatter with name/description and optional lang; no category, no
+// capabilities. IDs are auto-prefixed with ExternalSkillIDPrefix so they never
+// collide with builtin/project skills in the enabled-state key space. A file
+// without an explicit id falls back to its filename (without .md).
+func LoadExternalSkills(progDir string) []Skill {
+	skillsDir := filepath.Join(progDir, "skills")
+	if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
+		return nil
+	}
+
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return nil
+	}
+
+	var skills []Skill
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		data, err := os.ReadFile(filepath.Join(skillsDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+
+		fallbackID := strings.TrimSuffix(entry.Name(), ".md")
+		skill, err := parseSkillFile(string(data), SkillSourceExternal, fallbackID)
+		if err != nil {
+			continue
+		}
+
+		skill.ID = ExternalSkillIDPrefix + skill.ID
+		skills = append(skills, skill)
+	}
+
+	return skills
+}
+
+func parseSkillFile(content string, source string, fallbackID string) (Skill, error) {
 	skill := Skill{Source: source}
 
 	parts := strings.SplitN(content, "---", 3)
@@ -133,6 +182,13 @@ func parseSkillFile(content string, source string) (Skill, error) {
 	skill.Content = body
 
 	if skill.ID == "" {
+		skill.ID = fallbackID
+	}
+	if skill.Name == "" {
+		skill.Name = fallbackID
+	}
+
+	if skill.ID == "" {
 		return skill, fmt.Errorf("skill missing id")
 	}
 
@@ -146,10 +202,12 @@ func MergeSkills(builtin, project []Skill) []Skill {
 	return result
 }
 
-func LoadAllSkills(cfg *config.Config, projectDir string) []Skill {
+func LoadAllSkills(cfg *config.Config, progDir, projectDir string) []Skill {
 	builtin := LoadBuiltinSkills()
 	project := LoadProjectSkills(projectDir)
+	external := LoadExternalSkills(progDir)
 	merged := MergeSkills(builtin, project)
+	merged = append(merged, external...)
 	if cfg == nil {
 		return merged
 	}
@@ -169,20 +227,6 @@ func FilterSkillsByLang(skills []Skill, projectLang string) []Skill {
 	return out
 }
 
-func GetEnabledSkills(skills []Skill, sc *config.SkillConfig) []Skill {
-	if sc == nil || sc.EnabledSkills == nil {
-		return nil
-	}
-
-	var enabled []Skill
-	for _, s := range skills {
-		if sc.EnabledSkills[s.ID] {
-			enabled = append(enabled, s)
-		}
-	}
-	return enabled
-}
-
 func GetEnabledSkillsByCategory(skills []Skill, sc *config.SkillConfig, category string) []Skill {
 	if sc == nil || sc.EnabledSkills == nil {
 		return nil
@@ -195,6 +239,96 @@ func GetEnabledSkillsByCategory(skills []Skill, sc *config.SkillConfig, category
 		}
 	}
 	return enabled
+}
+
+// GetEnabledSkillsBySource returns enabled skills restricted to the given
+// sources (e.g. "builtin", "project", or story.SkillSourceExternal).
+func GetEnabledSkillsBySource(skills []Skill, sc *config.SkillConfig, sources ...string) []Skill {
+	if sc == nil || sc.EnabledSkills == nil {
+		return nil
+	}
+
+	srcSet := make(map[string]bool, len(sources))
+	for _, s := range sources {
+		srcSet[s] = true
+	}
+
+	var enabled []Skill
+	for _, s := range skills {
+		if srcSet[s.Source] && sc.EnabledSkills[s.ID] {
+			enabled = append(enabled, s)
+		}
+	}
+	return enabled
+}
+
+var skillTokenRe = regexp.MustCompile(`[a-z0-9]{3,}`)
+
+// skillTokenSet tokenizes a string into a set of significant tokens:
+// latin words (3+ chars) plus CJK character bigrams. Used for on-demand
+// external skill matching.
+func skillTokenSet(s string) map[string]struct{} {
+	set := make(map[string]struct{})
+	lower := strings.ToLower(s)
+	for _, w := range skillTokenRe.FindAllString(lower, -1) {
+		set[w] = struct{}{}
+	}
+	var cjk []rune
+	for _, r := range lower {
+		if r >= 0x4e00 && r <= 0x9fff {
+			cjk = append(cjk, r)
+			if len(cjk) >= 2 {
+				set[string(cjk[len(cjk)-2:])] = struct{}{}
+			}
+		} else {
+			cjk = cjk[:0]
+		}
+	}
+	return set
+}
+
+func sharedTokenCount(a, b string) int {
+	sa := skillTokenSet(a)
+	sb := skillTokenSet(b)
+	count := 0
+	for t := range sa {
+		if _, ok := sb[t]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+// SkillMatchesMessage reports whether the user message mentions the skill:
+// the skill's name appears verbatim, or at least two distinctive tokens from
+// its name/description appear in the message. Deterministic framework-level
+// matching — the model does not decide which skills to load.
+func SkillMatchesMessage(s Skill, message string) bool {
+	if message == "" {
+		return false
+	}
+	msg := strings.ToLower(message)
+	name := strings.ToLower(strings.TrimSpace(s.Name))
+	if name != "" && strings.Contains(msg, name) {
+		return true
+	}
+	if sharedTokenCount(s.Description, msg) >= 2 {
+		return true
+	}
+	return false
+}
+
+// FilterSkillsByMessage returns the skills whose name/description is mentioned
+// in the given message. External skills are injected this way instead of
+// always injecting every enabled skill into the assistant.
+func FilterSkillsByMessage(skills []Skill, message string) []Skill {
+	var matched []Skill
+	for _, s := range skills {
+		if SkillMatchesMessage(s, message) {
+			matched = append(matched, s)
+		}
+	}
+	return matched
 }
 
 func FormatSkillsContent(skills []Skill) string {

@@ -114,7 +114,19 @@ On the Skills page you can enable built-in skills:
 | Story de-slop audit | Polish | 6-gate AI-fingerprint detection workflow with human-writer baselines |
 | Writing craft | Writing | Chapter opening / closing hooks, payoff density, pacing |
 
-All skills are disabled by default; the writing prompt is not affected unless you turn them on. When a polish-type skill is enabled, the "De-AI polish" button on the writing page becomes useful per chapter, and the full-book optimisation step can attach the polish on top of every revision. Custom skill files in the project directory are also picked up.
+All skills are disabled by default; the writing prompt is not affected unless you turn them on. When a polish-type skill is enabled, the "De-AI polish" button on the writing page becomes useful per chapter, and the full-book optimisation step can attach the polish on top of every revision.
+
+**External (custom) skills**: drop a standard Markdown skill file into the `skills/` folder next to the program directory. The only format requirement is `name` / `description` (optional `lang`) plus the instruction body — nothing else:
+
+```markdown
+---
+name: Pacing
+description: Pacing control techniques for urban fantasy
+---
+(instructions for the AI)
+```
+
+External skills are fully isolated from built-in ones: they never create buttons and never affect the de-AI polish feature. When you **mention** a skill's name or topic in conversation, its instructions are injected into that conversation automatically. Enable toggles live on the Skills page (external skills are shown in a separate section) and are stored per project.
 
 English projects ship with English equivalents (`humanizer-en`, `story-deslop-en`, `writing-craft-en`); the skill list is filtered by project language automatically.
 
