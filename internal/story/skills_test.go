@@ -20,15 +20,19 @@ func writeSkillFile(t *testing.T, dir, name, content string) {
 func TestLoadExternalSkills(t *testing.T) {
 	progDir := t.TempDir()
 
-	writeSkillFile(t, filepath.Join(progDir, "skills"), "pacing.md", `---
+	// Standard subdirectory layout: skills/<skill-name>/SKILL.md
+	writeSkillFile(t, filepath.Join(progDir, "skills", "pacing"), "SKILL.md", `---
 name: 爽文节奏
-description: 适用于都市玄幻题材的节奏控制技巧
+description: |
+  适用于都市玄幻题材的节奏控制技巧
+  多行描述第二行
 lang: zh
 ---
 正文内容
 `)
 
-	writeSkillFile(t, filepath.Join(progDir, "skills"), "with-id.md", `---
+	// Subdirectory with explicit id in frontmatter.
+	writeSkillFile(t, filepath.Join(progDir, "skills", "with-id"), "SKILL.md", `---
 id: custom-id
 name: 自定义
 description: english description here
@@ -36,11 +40,20 @@ description: english description here
 body
 `)
 
+	// Legacy flat file layout.
+	writeSkillFile(t, filepath.Join(progDir, "skills"), "flat-only.md", `---
+name: 平铺技能
+description: legacy flat file
+---
+legacy body
+`)
+
 	writeSkillFile(t, filepath.Join(progDir, "skills"), "ignore.txt", "not a skill")
+	writeSkillFile(t, filepath.Join(progDir, "skills", "no-skill-md"), "other.md", "no SKILL.md here")
 
 	skills := LoadExternalSkills(progDir)
-	if len(skills) != 2 {
-		t.Fatalf("expected 2 external skills, got %d", len(skills))
+	if len(skills) != 3 {
+		t.Fatalf("expected 3 external skills, got %d", len(skills))
 	}
 
 	byID := map[string]Skill{}
@@ -53,7 +66,7 @@ body
 
 	pacing, ok := byID[ExternalSkillIDPrefix+"pacing"]
 	if !ok {
-		t.Fatalf("missing filename-fallback skill, got %v", byID)
+		t.Fatalf("missing subdirectory-fallback skill, got %v", byID)
 	}
 	if pacing.Name != "爽文节奏" {
 		t.Errorf("name = %q, want 爽文节奏", pacing.Name)
@@ -61,9 +74,16 @@ body
 	if pacing.Lang != "zh" {
 		t.Errorf("lang = %q, want zh", pacing.Lang)
 	}
+	if pacing.Description != "适用于都市玄幻题材的节奏控制技巧\n多行描述第二行" {
+		t.Errorf("description = %q, want block scalar multi-line value", pacing.Description)
+	}
 
 	if _, ok := byID[ExternalSkillIDPrefix+"custom-id"]; !ok {
 		t.Errorf("missing id-based skill with ext prefix")
+	}
+
+	if _, ok := byID[ExternalSkillIDPrefix+"flat-only"]; !ok {
+		t.Errorf("missing legacy flat-file skill with ext prefix")
 	}
 }
 
@@ -71,6 +91,40 @@ func TestLoadExternalSkillsMissingDir(t *testing.T) {
 	progDir := t.TempDir()
 	if skills := LoadExternalSkills(progDir); len(skills) != 0 {
 		t.Fatalf("expected no skills, got %d", len(skills))
+	}
+}
+
+func TestLoadProjectSkills(t *testing.T) {
+	projDir := t.TempDir()
+
+	// Standard subdirectory layout.
+	writeSkillFile(t, filepath.Join(projDir, "skills", "arc-craft"), "SKILL.md", `---
+name: 卷纲技巧
+description: 长卷章纲规划
+lang: zh
+---
+body
+`)
+
+	// Subdirectory without SKILL.md is skipped.
+	writeSkillFile(t, filepath.Join(projDir, "skills", "empty-dir"), "notes.txt", "x")
+
+	// Legacy flat file still works.
+	writeSkillFile(t, filepath.Join(projDir, "skills"), "flat.md", `---
+name: 平铺技能
+description: legacy
+---
+body
+`)
+
+	skills := LoadProjectSkills(projDir)
+	if len(skills) != 2 {
+		t.Fatalf("expected 2 project skills, got %d", len(skills))
+	}
+	for _, s := range skills {
+		if s.Source != "project" {
+			t.Errorf("source = %q, want project", s.Source)
+		}
 	}
 }
 

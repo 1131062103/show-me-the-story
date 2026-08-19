@@ -6,6 +6,7 @@ import (
 	"os"
 	"showmethestory/internal/fsutil"
 	"showmethestory/internal/i18n"
+	"sort"
 )
 
 type APIConfig struct {
@@ -116,9 +117,13 @@ func (p *APIProfiles) Normalize() {
 		if _, ok := p.Profiles["default"]; ok {
 			p.Active = "default"
 		} else {
+			names := make([]string, 0, len(p.Profiles))
 			for name := range p.Profiles {
-				p.Active = name
-				break
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			if len(names) > 0 {
+				p.Active = names[0]
 			}
 		}
 	}

@@ -116,17 +116,29 @@ On the Skills page you can enable built-in skills:
 
 All skills are disabled by default; the writing prompt is not affected unless you turn them on. When a polish-type skill is enabled, the "De-AI polish" button on the writing page becomes useful per chapter, and the full-book optimisation step can attach the polish on top of every revision.
 
-**External (custom) skills**: drop a standard Markdown skill file into the `skills/` folder next to the program directory. The only format requirement is `name` / `description` (optional `lang`) plus the instruction body — nothing else:
+**External (custom) skills**: create a subdirectory under the `skills/` folder next to the program directory for each skill, containing a `SKILL.md` file (the standard protocol, same as Code Agent skills). Reference docs/scripts can be placed alongside:
+
+```
+skills/
+├── chinese-novelist/
+│   ├── SKILL.md          # frontmatter + body (the instructions for the AI)
+│   └── references/…      # optional, referenced via relative links
+└── another-skill/
+    └── SKILL.md
+```
+
+The only format requirement is `name` / `description` (optional `lang`, `description` supports multi-line `|`) plus the instruction body — nothing else:
 
 ```markdown
 ---
 name: Pacing
-description: Pacing control techniques for urban fantasy
+description: |
+  Pacing control techniques for urban fantasy
 ---
 (instructions for the AI)
 ```
 
-External skills are fully isolated from built-in ones: they never create buttons and never affect the de-AI polish feature. When you **mention** a skill's name or topic in conversation, its instructions are injected into that conversation automatically. Enable toggles live on the Skills page (external skills are shown in a separate section) and are stored per project.
+External skills are fully isolated from built-in ones: they never create buttons and never affect the de-AI polish feature. When you **mention** a skill's name or topic in conversation, its instructions are injected into that conversation automatically. Enable toggles live on the Skills page (external skills are shown in a separate section) and are stored per project. The legacy flat `skills/*.md` layout still works.
 
 English projects ship with English equivalents (`humanizer-en`, `story-deslop-en`, `writing-craft-en`); the skill list is filtered by project language automatically.
 

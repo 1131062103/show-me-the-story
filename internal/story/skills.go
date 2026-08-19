@@ -70,23 +70,14 @@ func LoadProjectSkills(dir string) []Skill {
 		return nil
 	}
 
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		return nil
-	}
-
 	var skills []Skill
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-
-		data, err := os.ReadFile(filepath.Join(skillsDir, entry.Name()))
+	for _, f := range scanSkillDir(skillsDir) {
+		data, err := os.ReadFile(f.path)
 		if err != nil {
 			continue
 		}
 
-		skill, err := parseSkillFile(string(data), "project", "")
+		skill, err := parseSkillFile(string(data), "project", f.fallbackID)
 		if err != nil {
 			continue
 		}
@@ -97,36 +88,72 @@ func LoadProjectSkills(dir string) []Skill {
 	return skills
 }
 
+// skillFile is a resolved skill source: a path plus the fallback ID derived
+// from the enclosing directory (standard layout) or filename (legacy layout).
+type skillFile struct {
+	path       string
+	fallbackID string
+}
+
+// scanSkillDir lists skill files under dir. Two layouts are supported, with
+// the standard subdirectory layout taking precedence:
+//
+//	dir/<skill-name>/SKILL.md   (standard)
+//	dir/<skill-name>.md         (legacy flat files)
+//
+// The fallback ID is the skill-name segment (subdirectory name or filename
+// without .md), used when frontmatter has no explicit `id`.
+func scanSkillDir(dir string) []skillFile {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	var files []skillFile
+	for _, entry := range entries {
+		if entry.IsDir() {
+			path := filepath.Join(dir, entry.Name(), "SKILL.md")
+			if _, err := os.Stat(path); err == nil {
+				files = append(files, skillFile{path: path, fallbackID: entry.Name()})
+			}
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".md") {
+			files = append(files, skillFile{
+				path:       filepath.Join(dir, entry.Name()),
+				fallbackID: strings.TrimSuffix(entry.Name(), ".md"),
+			})
+		}
+	}
+	return files
+}
+
 // LoadExternalSkills loads standard-format skills from the program-level
-// skills/ dir (progDir/skills). Format follows the plain markdown convention:
-// frontmatter with name/description and optional lang; no category, no
-// capabilities. IDs are auto-prefixed with ExternalSkillIDPrefix so they never
-// collide with builtin/project skills in the enabled-state key space. A file
-// without an explicit id falls back to its filename (without .md).
+// skills/ dir (progDir/skills). The standard layout is one subdirectory per
+// skill containing a SKILL.md file:
+//
+//	skills/<skill-name>/SKILL.md
+//
+// Flat <skill-name>.md files are also accepted as a legacy fallback. Format
+// follows the plain markdown convention: frontmatter with name/description and
+// optional lang; no category, no capabilities. IDs are auto-prefixed with
+// ExternalSkillIDPrefix so they never collide with builtin/project skills in
+// the enabled-state key space. A file without an explicit id falls back to its
+// skill-name segment.
 func LoadExternalSkills(progDir string) []Skill {
 	skillsDir := filepath.Join(progDir, "skills")
 	if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
 		return nil
 	}
 
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		return nil
-	}
-
 	var skills []Skill
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-
-		data, err := os.ReadFile(filepath.Join(skillsDir, entry.Name()))
+	for _, f := range scanSkillDir(skillsDir) {
+		data, err := os.ReadFile(f.path)
 		if err != nil {
 			continue
 		}
 
-		fallbackID := strings.TrimSuffix(entry.Name(), ".md")
-		skill, err := parseSkillFile(string(data), SkillSourceExternal, fallbackID)
+		skill, err := parseSkillFile(string(data), SkillSourceExternal, f.fallbackID)
 		if err != nil {
 			continue
 		}
@@ -146,40 +173,19 @@ func parseSkillFile(content string, source string, fallbackID string) (Skill, er
 		return skill, fmt.Errorf("invalid skill file format: missing frontmatter")
 	}
 
-	frontmatter := strings.TrimSpace(parts[1])
-	body := strings.TrimSpace(parts[2])
-
-	for _, line := range strings.Split(frontmatter, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		kv := strings.SplitN(line, ":", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(kv[0])
-		value := strings.TrimSpace(kv[1])
-
-		switch key {
-		case "id":
-			skill.ID = value
-		case "name":
-			skill.Name = value
-		case "description":
-			skill.Description = value
-		case "category":
-			skill.Category = value
-		case "lang":
-			skill.Lang = i18n.NormalizeLanguage(value)
-		case "source":
-			if source == "" {
-				skill.Source = value
-			}
-		}
+	fields := parseSkillFrontmatter(parts[1])
+	skill.ID = fields["id"]
+	skill.Name = fields["name"]
+	skill.Description = fields["description"]
+	skill.Category = fields["category"]
+	if lang := fields["lang"]; lang != "" {
+		skill.Lang = i18n.NormalizeLanguage(lang)
+	}
+	if source == "" {
+		skill.Source = fields["source"]
 	}
 
-	skill.Content = body
+	skill.Content = strings.TrimSpace(parts[2])
 
 	if skill.ID == "" {
 		skill.ID = fallbackID
@@ -193,6 +199,57 @@ func parseSkillFile(content string, source string, fallbackID string) (Skill, er
 	}
 
 	return skill, nil
+}
+
+// parseSkillFrontmatter parses the YAML frontmatter block of a skill file into
+// a flat string map. It supports simple `key: value` pairs as well as YAML
+// block scalars (`key: |` / `key: >` with indented continuation lines, used
+// for multi-line descriptions). Nested maps and quoted values are flattened to
+// their first-line scalar, which is sufficient for the skill metadata fields.
+func parseSkillFrontmatter(frontmatter string) map[string]string {
+	fields := make(map[string]string)
+	lines := strings.Split(frontmatter, "\n")
+
+	var blockKey string
+	var blockLines []string
+	flushBlock := func() {
+		if blockKey != "" {
+			fields[blockKey] = strings.TrimSpace(strings.Join(blockLines, "\n"))
+		}
+		blockKey = ""
+		blockLines = nil
+	}
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if blockKey != "" {
+			// Block scalar: keep collecting indented continuation lines until
+			// a non-indented line or a closing blank line arrives.
+			if line == "" || strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+				blockLines = append(blockLines, strings.TrimSpace(line))
+				continue
+			}
+			flushBlock()
+		}
+
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || !strings.Contains(trimmed, ":") {
+			continue
+		}
+		kv := strings.SplitN(trimmed, ":", 2)
+		key := strings.TrimSpace(kv[0])
+		value := strings.TrimSpace(kv[1])
+
+		switch value {
+		case "|", ">", "|-", ">-", "|+", ">+":
+			blockKey = key
+			blockLines = nil
+			continue
+		}
+		fields[key] = strings.Trim(value, `"'`)
+	}
+	flushBlock()
+	return fields
 }
 
 func MergeSkills(builtin, project []Skill) []Skill {

@@ -102,7 +102,7 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 | `internal/story/reconcile.go` | `ReconcileSettingsAction`（保持用户提交的 `newSettings`，AI 调整差异写入 pending 提案）、`regeneratePendingOutlines`、设定协调逻辑 |
 | `internal/story/config_guard.go` | `ConfigFieldChange`/`PendingConfigChanges` 结构体，`CollectStoryConfigConflicts`、`applyStoryConfigMerge`、`applyOutlineMetaWithGuard`、`Load/SavePendingConfigChanges`（`pending_config_changes.json`）、`ApplySelectedPendingChanges`、`SyncProgressMetaFromStory` |
 | `internal/story/settings.go` | `Character`、`WorldviewEntry`、`Organization`、`Relation`、`ProjectSettings` 结构体（含 `NextCharacterID` 等 ID 分配；角色/世界观/组织含可选 `Acts []int` 按幕归属过滤），`LoadProjectSettings`、`SaveProjectSettings` |
-| `internal/story/skills.go` | `Skill`（含 `Lang` 字段）结构体（`SkillConfig` 在 `internal/config`），`LoadBuiltinSkills`、`LoadProjectSkills`、`LoadExternalSkills(progDir)`（从程序目录 `skills/` 加载**标准格式**外置技能，id 自动加 `ext.` 前缀，无显式 id 用文件名兜底）、`MergeSkills`、`GetEnabledSkillsByCategory`、`GetEnabledSkillsBySource`、`FilterSkillsByLang(skills, projectLang)`、`SkillMatchesMessage`/`FilterSkillsByMessage`（外置技能按当前用户消息提及匹配，供 Agent 按需注入）、`FormatSkillsContent`（按 skill 语言选择双语 header）、`//go:embed embeds/skills` |
+| `internal/story/skills.go` | `Skill`（含 `Lang` 字段）结构体（`SkillConfig` 在 `internal/config`），`LoadBuiltinSkills`、`LoadProjectSkills`、`LoadExternalSkills(progDir)`（从程序目录 `skills/` 加载**标准格式**外置技能，支持 `skills/<name>/SKILL.md` 子目录布局（目录名兜底 id）+ 旧平铺 `*.md` legacy 布局，id 自动加 `ext.` 前缀）、`scanSkillDir`（两种布局统一扫描）、`parseSkillFrontmatter`（YAML frontmatter 解析，支持 `description: \|` block scalar 多行）、`MergeSkills`、`GetEnabledSkillsByCategory`、`GetEnabledSkillsBySource`、`FilterSkillsByLang(skills, projectLang)`、`SkillMatchesMessage`/`FilterSkillsByMessage`（外置技能按当前用户消息提及匹配，供 Agent 按需注入）、`FormatSkillsContent`（按 skill 语言选择双语 header）、`//go:embed embeds/skills` |
 | `internal/story/editing.go` | `EditChapterContent` 章节正文局部编辑（`replace_lines`/`replace_text`/`insert_after_line`/`append`），`EditChapterContentRequest` 结构体，`EditOp` 常量，`FindChapterIdx` 辅助函数 |
 | `internal/story/chat.go` | `ChatSession`、`ChatMessage`（含 `tool_result_key`/`tool_result_args`、`Attachments []ChatAttachment` 附件引用）、`ToolCall`、`ChatSessionIndex` 结构体，Load/Save/Delete、`ChatSessionsDir`/`GenerateSessionID`/`GenerateChatTitle` |
 | `internal/story/chat_attachments.go` | 聊天附件：`ChatAttachment`（持久化引用 `{name,type,path}`，path 相对 sessions 目录）、`ChatAttachmentInput`（POST 请求 base64 输入）、`SaveChatAttachments`（类型白名单 图片/纯文本 + 单文件≤8MB + 每次≤5 个 + 总量≤20MB，落盘 `sessions/{id}/attachments/`）、`ChatAttachmentAbsPath`（路径穿越防护，要求 `{sessionID}/attachments/{file}` 三段结构）、`BuildAttachmentContentParts`（读取附件组装 `[]llm.ContentPart`：图片 → base64 data URL 的 image_url 块，文本 → 截断 2 万字注入 text 块）、`DeleteSessionAttachments`（删会话时清理） |
@@ -257,7 +257,17 @@ API 配置（`APIConfig`）与故事配置（`Config`）完全分离，分别保
 
 ### 外置技能（标准协议）
 
-`progDir/skills/` 下的 `.md` 文件为外置技能，面向第三方开发者自行添加，走**标准 Markdown 协议**（与 Code Agent 技能一致），与内置技能完全隔离：
+`progDir/skills/` 下每个外置技能一个子目录，内含 `SKILL.md`，面向第三方开发者自行添加，走**标准 Markdown 协议**（与 Code Agent 技能一致，`skills/<skill-name>/SKILL.md`），与内置技能完全隔离；目录内可附带参考文档/脚本等资源：
+
+```
+skills/
+├── chinese-novelist/
+│   ├── SKILL.md          # frontmatter + 正文即给 AI 的指令文本
+│   ├── README.md         # 可选，目录内任意附加资源，不解析为技能
+│   └── references/…      # 相对路径引用（正文用相对链接指向即可）
+└── another-skill/
+    └── SKILL.md
+```
 
 ```markdown
 ---
@@ -268,8 +278,10 @@ lang: zh        # 可选，不写=语言无关
 （正文即给 AI 的指令文本）
 ```
 
+`description` 支持 YAML block scalar 多行（`description: |`），技能目录名作为 id 兜底（frontmatter 无显式 `id` 时）。旧的平铺 `skills/*.md` 布局仍兼容（作为 legacy fallback 加载，以文件名兜底）。
+
 - **无任何额外要求**：没有 category、没有能力声明、不产生按钮，只服务对话。去AI味等内置操作不感知外置技能
-- **ID 隔离**：加载时自动给外置技能 id 加 `ext.` 前缀（`ExternalSkillIDPrefix`），无显式 id 用文件名兜底；`config.json` 的开关 key 也是 `ext.xxx`，与内置/项目技能永不冲突
+- **ID 隔离**：加载时自动给外置技能 id 加 `ext.` 前缀（`ExternalSkillIDPrefix`），无显式 id 用技能目录名兜底；`config.json` 的开关 key 也是 `ext.xxx`，与内置/项目技能永不冲突
 - **按需注入**：外置技能不随启用量全量注入，而是框架层拿当前用户消息做关键词匹配（`SkillMatchesMessage`），命中才把全文注入该轮 system prompt；匹配逻辑在框架侧（正则 + CJK bigram），不依赖 AI 判断
 - **启用状态**：存各项目 `config.json`（`SkillConfig.EnabledSkills`，key 带 `ext.`），每个项目可独立开关；允许只启用外置技能
 - **仓库**：仓库提交 `skills/.gitkeep` 占位，目录内容被 `.gitignore` 忽略；发布包（tar.gz/zip）包含空 `skills/` 目录便于使用者发现
@@ -741,7 +753,7 @@ API 配置保存 `api.json`，故事配置保存 `config.json`。设定保存 `s
 | `internal/story/embeds/skills/story-deslop-en.md` | `story-deslop-en` | en | polish | 6-Gate 英文检测：slop-word 密度（per 1000 words）/英文陈词/em-dash & 三联结构/语音差异/emotion-by-body/节奏与开篇结尾，按英文 trade fiction 基线 |
 | `internal/story/embeds/skills/writing-craft-en.md` | `writing-craft-en` | en | writing | 章首钩子 7 式 + 章尾钩子 13 式 + Sanderson 的 promise/progress/payoff + Swain scene-and-sequel 节奏 + 对话经济 + 角色 voice + 按场景类型节奏表（英文 trade fiction 范式，非"爽点"框架） |
 
-Skill 文件格式：YAML frontmatter（`---` 分隔，含 `lang: zh|en`，无 `lang` 视为语言无关）+ Markdown body。`LoadAllSkills(cfg, progDir, projectDir)` 合并内置 + 项目 + 外置技能，经 `FilterSkillsByLang` 按 `cfg.Language` 过滤可见 skill。前端通过 `GET /api/skills` 获取列表，`PUT /api/skills/{id}/toggle` 切换启用状态（外置技能 id 带 `ext.` 前缀）。
+Skill 文件格式：YAML frontmatter（`---` 分隔，含 `lang: zh|en`，无 `lang` 视为语言无关；`description` 支持 `|` block scalar 多行）+ Markdown body。内置/项目/外置技能内容格式相同；外置技能额外要求子目录布局 `skills/<name>/SKILL.md`（平铺 `.md` 兼容）。`LoadAllSkills(cfg, progDir, projectDir)` 合并内置 + 项目 + 外置技能，经 `FilterSkillsByLang` 按 `cfg.Language` 过滤可见 skill。前端通过 `GET /api/skills` 获取列表，`PUT /api/skills/{id}/toggle` 切换启用状态（外置技能 id 带 `ext.` 前缀）。
 
 **英文 skill 是本地化设计而非中文翻译**：英文 LLM 的 AI 痕迹（delve / tapestry / em-dash 泛滥 / said-bookisms / "in a world where" 等）与中文 LLM 的痕迹（宛如 / 不禁 / 微微 / 缓缓 / 心中暗道 等）不同；写作技法框架也按英文 trade fiction 约定（Sanderson、Swain）而非中文网文的爽点密度。
 
