@@ -69,6 +69,9 @@ export default {
   'projects.bookTitle': '《{title}》',
   'projects.toast.switched': '已切换到项目: {name}',
   'projects.toast.deleted': '项目已删除',
+  'projects.toast.renamed': '项目已重命名为 {name}',
+  'projects.rename': '重命名',
+  'projects.rename.placeholder': '输入新名称...',
   'projects.toast.needName': '请输入项目名称',
 
   // Toasts (translated from server-side Chinese messages)

@@ -111,9 +111,9 @@ main.go                      入口：progDir 解析、api.json 加载、//go:em
 | `internal/story/*_test.go` | 领域层单测：存储 roundtrip/脏检查/孤儿清理、Block ID 稳定性与 CRUD、卷区间换算与上下文压缩、导入切章/断点、引用式段落修订、字数区间、删章目标解析等 |
 | `internal/agent/agent.go` | `Tool`、`AgentContext`、`AgentStep` 结构体（`ToolCall` 别名指向 `story.ToolCall`），`RunAgentLoop(goCtx, ctx, userMessage, history, maxSteps, attachments)`（多轮消息历史 + 双语 tool 结果标签；当前用户消息带附件时经 `story.BuildAttachmentContentParts` 组装为多部分 `llm.Content`）、工具调用解析（`llm.ExtractJSON` 字符串感知；未闭合/解析失败时注入诊断提示让模型重试一次，仍失败则 `agent.output_truncated` / `agent.tool_call_parse_failed`，不修复截断 JSON）、内置工具集（读/写角色/世界观/章节等）、`buildAgentSystemPromptZH`/`buildAgentSystemPromptEN`（接受 `userMessage`：内置/项目技能启用即全量注入，外置技能经 `FilterSkillsByMessage` 按消息提及匹配后注入）、`update_project_config` 覆盖已填字段需 `confirm_overwrite: true`、`requireConfirm`（破坏性工具需 `confirm: true`）；文件内含原 `agent_i18n.go` 的 `agentMsg`/`agentErr` i18n 辅助 |
 | `internal/agent/agent_truncated_test.go` | Agent 工具调用解析单元测试：截断不修复、`ExtractJSON` 字符串感知、失败尝试识别、解析重试反馈、`finish_reason` 截断检测 |
-| `internal/httpapi/handlers.go` | `Handlers` 结构体（含 API 多配置存储 `apiProfiles`/`apiCfg`（激活 profile）、项目管理字段 `progDir`/`projectName`/`projectMu`、自动确认开关 `autoConfirm`、`postprocess`/`postprocessPath`）、`projectDir()` 帮助函数、项目切换 `switchProject()`、`ensureProject()` 检查、`rejectIfTaskRunning()`（任务运行期间编辑类端点返回 409）、`writeErrorReq` 本地化错误响应、API 多配置 handler（`GetAPIProfiles`/`PostAPIProfile`/`PutAPIProfile`/`DeleteAPIProfile`/`PostAPIProfileSelect`/`GetAPIModels`）、所有 HTTP handler（块编辑/卷/导入/全书优化/自动确认等）、`PostChapterGenerate` 自动确认循环、`tryStartTask`/`endTask`/`startChildWork` 互斥、项目管理 handler、`GetVersion` |
+| `internal/httpapi/handlers.go` | `Handlers` 结构体（含 API 多配置存储 `apiProfiles`/`apiCfg`（激活 profile）、项目管理字段 `progDir`/`projectName`/`projectMu`、自动确认开关 `autoConfirm`、`postprocess`/`postprocessPath`）、`projectDir()` 帮助函数、项目切换 `switchProject()`（经 `updateProjectPathsLocked` 统一重算路径字段）、`ensureProject()` 检查、`rejectIfTaskRunning()`（任务运行期间编辑类端点返回 409）、`writeErrorReq` 本地化错误响应、API 多配置 handler（`GetAPIProfiles`/`PostAPIProfile`/`PutAPIProfile`/`DeleteAPIProfile`/`PostAPIProfileSelect`/`GetAPIModels`）、所有 HTTP handler（块编辑/卷/导入/全书优化/自动确认等）、`PostChapterGenerate` 自动确认循环、`tryStartTask`/`endTask`/`startChildWork` 互斥、项目管理 handler、`GetVersion` |
 | `internal/httpapi/project_compat.go` | 项目格式只读检测：新工程以 `config.json.project_format_version=3` 为契约；旧版内嵌章节正文或未识别布局标记为不兼容。选择前拒绝，保证不会创建目录或写回配置；无标记但完整 v3 分章布局可作为历史 v3 项目兼容打开并补写标记 |
-| `internal/httpapi/web.go` | 路由注册（含项目管理端点、API 多配置与模型拉取端点 `/api/config/api/profiles*`/`/api/config/api/models`、`/api/autoconfirm`、`/api/version`）、CORS/日志中间件、静态文件服务（`StartWebServer` 接收 main 传入的 `fs.FS`） |
+| `internal/httpapi/web.go` | 路由注册（含项目管理端点 `GET/POST /api/projects`、`GET /api/projects/current`、`POST /api/projects/select`、`PUT/DELETE /api/projects/{name}`、API 多配置与模型拉取端点 `/api/config/api/profiles*`/`/api/config/api/models`、`/api/autoconfirm`、`/api/version`）、CORS/日志中间件、静态文件服务（`StartWebServer` 接收 main 传入的 `fs.FS`） |
 | `internal/story/embeds/skills/*.md` | 内置 Skill 文件（YAML frontmatter `lang: zh|en` + prompt body），通过 `//go:embed` 嵌入；中文：`humanizer-zh.md` / `story-deslop.md` / `writing-craft.md`；英文：`humanizer-en.md` / `story-deslop-en.md` / `writing-craft-en.md` |
 | `.github/workflows/release.yml` | GitHub Actions 发布流程：推送 `v*` tag 时校验 tag 在 main 分支上，构建前端 + 交叉编译 5 个目标（linux/windows/macOS × amd64/arm64，windows 仅 amd64），打包 tar.gz/zip（含 `skills/` 空目录）并用 `gh` 创建 Release；通过 `-ldflags "-X main.version=${GITHUB_REF_NAME}"` 注入版本号 |
 
@@ -542,8 +542,8 @@ API 配置保存 `api.json`，故事配置保存 `config.json`。设定保存 `s
 | GET | `/api/projects` | 同步 | 列出所有项目 |
 | POST | `/api/projects` | 同步 | 创建新项目 |
 | GET | `/api/projects/current` | 同步 | 获取当前项目名 |
-| GET | `/api/version` | 同步 | 获取应用版本号（CI 注入，非 CI 编译为 `dev`） |
 | POST | `/api/projects/select` | 同步 | 切换到指定项目 |
+| PUT | `/api/projects/{name}` | 同步 | 重命名项目（body `{name}` 新名称；改名当前项目时后端同步更新全部路径字段并返回 `was_current:true`） |
 | DELETE | `/api/projects/{name}` | 同步 | 删除项目 |
 | GET | `/api/config/api` | 同步 | 获取当前激活的 API 配置 |
 | PUT | `/api/config/api` | 同步 | 保存当前激活的 API 配置 |

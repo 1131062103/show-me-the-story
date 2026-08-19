@@ -11,7 +11,7 @@ The program ships with no story content of its own — the genre, world, charact
 ## Highlights
 
 - **Single executable**: one binary plus a browser, no database or other dependencies
-- **Multi-project**: each novel lives in its own project; switch / create / delete freely
+- **Multi-project**: each novel lives in its own project; switch / create / rename / delete freely
 - **Two-phase writing**: AI first drafts a full outline for you to review and revise; once confirmed, it writes chapter by chapter
 - **Chapter review**: after each chapter, confirm or request revisions; the AI does targeted, minimal edits without disturbing other chapters
 - **Auto-confirm mode**: optional toggle that lets the AI confirm each chapter and continue automatically; can be flipped on or off at any time

@@ -7,6 +7,8 @@
   let newProjectName = '';
   let newProjectLang = 'zh';
   let creating = false;
+  let renamingName = null;
+  let renameValue = '';
 
   onMount(loadProjects);
 
@@ -82,6 +84,37 @@
         addToast(e.message, 'error');
       }
     });
+  }
+
+  function startRename(name) {
+    renamingName = name;
+    renameValue = name;
+  }
+
+  function cancelRename() {
+    renamingName = null;
+    renameValue = '';
+  }
+
+  async function saveRename(oldName) {
+    const name = renameValue.trim();
+    if (!name) {
+      addToast($t('projects.toast.needName'), 'error');
+      return;
+    }
+    try {
+      const res = await api('PUT', '/api/projects/' + encodeURIComponent(oldName), { name });
+      const newName = res?.name || name;
+      renamingName = null;
+      renameValue = '';
+      await loadProjects();
+      if (res?.was_current) {
+        currentProject.set(newName);
+      }
+      addToast($t('projects.toast.renamed', { name: newName }), 'success');
+    } catch (e) {
+      addToast(e.message, 'error');
+    }
   }
 
   function handleKeydown(e) {
@@ -168,36 +201,68 @@
                   {(p.name || '?')[0]}
                 </div>
                 <div class="flex-1 min-w-0">
-                  <div class="text-sm font-medium truncate flex items-center gap-2">
-                    <span>{p.name}</span>
-                    <span class="badge badge-accent badge-xs uppercase">{(p.language || 'zh') === 'en' ? 'EN' : 'ZH'}</span>
-                    {#if p.compatibility !== 'supported'}
-                      <span class="badge badge-warning badge-xs">{$t('projects.incompatible.badge')}</span>
-                    {/if}
-                  </div>
-                  <div class="text-xs text-base-content/40 truncate">
-                    {#if p.compatibility !== 'supported'}
-                      {$t('projects.incompatible.hint')}
-                    {:else if p.title}
-                      {$t('projects.bookTitle', { title: p.title })}
-                      {#if p.phase}
-                        · {phaseLabel(p.phase)}
+                  {#if renamingName === p.name}
+                    <div class="flex items-center gap-2" on:click|stopPropagation>
+                      <input
+                        type="text"
+                        class="input input-xs w-full max-w-[14rem]"
+                        bind:value={renameValue}
+                        placeholder={$t('projects.rename.placeholder')}
+                        on:keydown={e => {
+                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveRename(p.name); }
+                          if (e.key === 'Escape') { cancelRename(); }
+                        }}
+                        disabled={$taskRunning}
+                      />
+                      <button class="btn btn-primary btn-xs" on:click={() => saveRename(p.name)} disabled={$taskRunning}>
+                        {$t('common.save')}
+                      </button>
+                      <button class="btn btn-ghost btn-xs" on:click={cancelRename}>{$t('common.cancel')}</button>
+                    </div>
+                  {:else}
+                    <div class="text-sm font-medium truncate flex items-center gap-2">
+                      <span>{p.name}</span>
+                      <span class="badge badge-accent badge-xs uppercase">{(p.language || 'zh') === 'en' ? 'EN' : 'ZH'}</span>
+                      {#if p.compatibility !== 'supported'}
+                        <span class="badge badge-warning badge-xs">{$t('projects.incompatible.badge')}</span>
                       {/if}
-                    {:else}
-                      {$t('projects.emptyProject')}
-                    {/if}
-                  </div>
+                    </div>
+                    <div class="text-xs text-base-content/40 truncate">
+                      {#if p.compatibility !== 'supported'}
+                        {$t('projects.incompatible.hint')}
+                      {:else if p.title}
+                        {$t('projects.bookTitle', { title: p.title })}
+                        {#if p.phase}
+                          · {phaseLabel(p.phase)}
+                        {/if}
+                      {:else}
+                        {$t('projects.emptyProject')}
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
                 {#if $currentProject === p.name}
                   <span class="badge badge-primary badge-xs">{$t('projects.current')}</span>
+                {:else if renamingName === p.name}
+                  <span></span>
                 {:else}
-                  <button
-                    class="btn btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100 transition-opacity"
-                    on:click|stopPropagation={() => deleteProject(p.name)}
-                    disabled={$taskRunning}
-                  >
-                    {$t('common.delete')}
-                  </button>
+                  <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      class="btn btn-ghost btn-xs"
+                      on:click|stopPropagation={() => startRename(p.name)}
+                      disabled={$taskRunning}
+                      title={$t('projects.rename')}
+                    >
+                      {$t('projects.rename')}
+                    </button>
+                    <button
+                      class="btn btn-ghost btn-xs text-error"
+                      on:click|stopPropagation={() => deleteProject(p.name)}
+                      disabled={$taskRunning}
+                    >
+                      {$t('common.delete')}
+                    </button>
+                  </div>
                 {/if}
               </div>
             {/each}

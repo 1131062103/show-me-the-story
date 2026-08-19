@@ -68,6 +68,9 @@ export default {
   'projects.bookTitle': '"{title}"',
   'projects.toast.switched': 'Switched to project: {name}',
   'projects.toast.deleted': 'Project deleted',
+  'projects.toast.renamed': 'Project renamed to {name}',
+  'projects.rename': 'Rename',
+  'projects.rename.placeholder': 'Enter new name...',
   'projects.toast.needName': 'Please enter a project name',
 
   'toast.taskDone': '✓ {name} done',

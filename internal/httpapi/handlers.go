@@ -104,6 +104,18 @@ func (h *Handlers) projectDir() string {
 	return filepath.Join(h.progDir, "storys", h.projectName)
 }
 
+// updateProjectPathsLocked recomputes every per-project path field for the given
+// project name. Caller must hold projectMu.Lock().
+func (h *Handlers) updateProjectPathsLocked(name string) {
+	projectDir := filepath.Join(h.progDir, "storys", name)
+	h.projectName = name
+	h.cfgPath = filepath.Join(projectDir, "config.json")
+	h.progressPath = filepath.Join(projectDir, "progress.json")
+	h.settingsPath = filepath.Join(projectDir, "settings.json")
+	h.sessionsDir = filepath.Join(projectDir, "sessions")
+	h.postprocessPath = filepath.Join(projectDir, "postprocess.json")
+}
+
 // switchProject loads all project-specific data for the given project name.
 func (h *Handlers) switchProject(name string) error {
 	h.projectMu.Lock()
@@ -155,16 +167,11 @@ func (h *Handlers) switchProject(name string) error {
 		return fmt.Errorf("加载全书优化状态失败: %w", err)
 	}
 
-	h.projectName = name
+	h.updateProjectPathsLocked(name)
 	h.cfg = cfg
-	h.cfgPath = configPath
 	h.state = state
-	h.progressPath = progressPath
 	h.settings = settings
-	h.settingsPath = settingsPath
 	h.skills = skills
-	h.sessionsDir = sessionsDir
-	h.postprocessPath = postprocessPath
 	h.postprocess = postprocess
 
 	fmt.Printf(" [系统] 已切换到项目: %s (%s)\n", name, projectDir)

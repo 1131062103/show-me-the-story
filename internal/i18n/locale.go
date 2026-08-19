@@ -55,6 +55,14 @@ var errorCatalog = map[string]map[string]string{
 		LangZH: "项目已存在",
 		LangEN: "Project already exists",
 	},
+	"project_name_same": {
+		LangZH: "新名称与当前名称相同",
+		LangEN: "New name is the same as the current name",
+	},
+	"rename_project_failed": {
+		LangZH: "重命名项目失败: %s",
+		LangEN: "Failed to rename project: %s",
+	},
 	"project_incompatible": {
 		LangZH: "此项目由旧版或未知版本创建，v3 为保护数据不会打开它。请使用原版本程序继续操作。",
 		LangEN: "This project was created by an older or unknown version. v3 will not open it to protect your data; use its original version instead.",

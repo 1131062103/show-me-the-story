@@ -296,6 +296,10 @@ var messageCatalog = map[string]map[string]string{
 		LangZH: "项目「%s」创建成功",
 		LangEN: "Project \"%s\" created",
 	},
+	"log.project_renamed": {
+		LangZH: "项目「%s」已重命名为「%s」",
+		LangEN: "Project \"%s\" renamed to \"%s\"",
+	},
 
 	// ---- Writing pipeline logs ----
 	"log.chapter_start": {

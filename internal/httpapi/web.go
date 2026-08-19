@@ -33,6 +33,7 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 	mux.HandleFunc("POST /api/projects", h.PostProject)
 	mux.HandleFunc("GET /api/projects/current", h.GetProjectCurrent)
 	mux.HandleFunc("POST /api/projects/select", h.PostProjectSelect)
+	mux.HandleFunc("PUT /api/projects/{name}", h.RenameProject)
 	mux.HandleFunc("DELETE /api/projects/{name}", h.DeleteProject)
 
 	// Version endpoint (global, always available)
@@ -354,6 +355,78 @@ func (h *Handlers) PostProjectSelect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]string{"name": h.projectName})
+}
+
+// validateProjectName checks a project name for the same rules as creation.
+func validateProjectName(name string) bool {
+	for _, c := range name {
+		if c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' {
+			return false
+		}
+	}
+	return true
+}
+
+func (h *Handlers) RenameProject(w http.ResponseWriter, r *http.Request) {
+	if h.isTaskRunning() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+
+	oldName := r.PathValue("name")
+	if oldName == "" {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "missing_project_name")
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "missing_project_name")
+		return
+	}
+
+	newName := strings.TrimSpace(req.Name)
+	if newName == oldName {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "project_name_same")
+		return
+	}
+	if !validateProjectName(newName) {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "project_name_invalid_chars")
+		return
+	}
+
+	h.projectMu.Lock()
+	defer h.projectMu.Unlock()
+
+	oldDir := filepath.Join(h.storysDir(), oldName)
+	newDir := filepath.Join(h.storysDir(), newName)
+
+	if _, err := os.Stat(oldDir); os.IsNotExist(err) {
+		h.writeErrorReq(w, r, http.StatusNotFound, "project_not_found")
+		return
+	}
+	if _, err := os.Stat(newDir); err == nil {
+		h.writeErrorReq(w, r, http.StatusConflict, "project_exists")
+		return
+	}
+
+	if err := os.Rename(oldDir, newDir); err != nil {
+		h.writeErrorReq(w, r, http.StatusInternalServerError, "rename_project_failed", err.Error())
+		return
+	}
+
+	wasCurrent := h.projectName == oldName
+	if wasCurrent {
+		h.updateProjectPathsLocked(newName)
+	}
+
+	h.logger.InfoKey("log.project_renamed", oldName, newName)
+	h.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"name":       newName,
+		"was_current": wasCurrent,
+	})
 }
 
 func (h *Handlers) DeleteProject(w http.ResponseWriter, r *http.Request) {
