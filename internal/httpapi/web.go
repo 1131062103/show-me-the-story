@@ -225,10 +225,6 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 		}
 		name := entry.Name()
 		projectDir := filepath.Join(storysDir, name)
-		compatibility, err := detectProjectCompatibility(projectDir)
-		if err != nil {
-			compatibility = projectCompatibilityUnknown
-		}
 
 		// Get progress info if available
 		phase := ""
@@ -254,11 +250,10 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 		}
 
 		info := map[string]string{
-			"name":          name,
-			"phase":         phase,
-			"title":         title,
-			"language":      lang,
-			"compatibility": compatibility,
+			"name":     name,
+			"phase":    phase,
+			"title":    title,
+			"language": lang,
 		}
 
 		// Get mod time for sorting
@@ -346,10 +341,6 @@ func (h *Handlers) PostProjectSelect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.switchProject(req.Name); err != nil {
-		if isProjectCompatibilityError(err) {
-			h.writeErrorReq(w, r, http.StatusConflict, "project_incompatible")
-			return
-		}
 		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}

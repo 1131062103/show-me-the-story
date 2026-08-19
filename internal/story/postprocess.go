@@ -509,7 +509,6 @@ func BuildRoadmapAction(ctx context.Context, apiCfg *config.APIConfig, cfg *conf
 		"ConsistencyReport":  consistencyReport,
 		"AuthorRequirements": authorBlock,
 	})
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.BookRoadmap, userPrompt, "{{.AuthorRequirements}}", authorBlock)
 	systemPrompt := i18n.SystemPromptFor(cfg.Language, "book_roadmap")
 
 	resp := llm.CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)

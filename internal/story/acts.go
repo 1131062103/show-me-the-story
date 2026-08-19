@@ -168,7 +168,6 @@ func GenerateBookOverviewAction(ctx context.Context, apiCfg *config.APIConfig, c
 		"StorySynopsis": cfg.Story.StorySynopsis,
 	}, cfg, settings)
 	userPrompt := config.RenderPrompt(cfg.Prompts.BookOverview, data)
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.BookOverview, userPrompt, "{{.CharacterList}}", formatCharacterListForOutline(settings, cfg.Language))
 	systemPrompt := i18n.SystemPromptFor(cfg.Language, "outline_editor_json")
 
 	rawResp := llm.CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)
@@ -303,7 +302,6 @@ func GenerateArcPlanAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 	}
 	data := mergeOutlinePromptData(baseData, cfg, settings)
 	userPrompt := config.RenderPrompt(cfg.Prompts.ArcOutline, data)
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ArcOutline, userPrompt, "{{.CharacterList}}", formatCharacterListForOutline(settings, cfg.Language))
 	systemPrompt := i18n.SystemPromptFor(lang, "outline_editor_json")
 
 	rawResp := llm.CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)
@@ -463,7 +461,6 @@ func GenerateActOutlineAction(ctx context.Context, apiCfg *config.APIConfig, cfg
 		"FutureActs":     buildFutureActsBlock(state, ai, ax, lang),
 	}, cfg, settings)
 	userPrompt := config.RenderPrompt(cfg.Prompts.ActOutline, data)
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ActOutline, userPrompt, "{{.CharacterList}}", formatCharacterListForOutline(settings, cfg.Language))
 	systemPrompt := i18n.SystemPromptFor(lang, "outline_editor_json")
 
 	rawResp := llm.CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)

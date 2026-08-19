@@ -92,17 +92,6 @@ func isChapterMetaLine(line string, lang string) bool {
 	return false
 }
 
-func formatWritingPOVBlock(pov, lang string) string {
-	pov = strings.TrimSpace(pov)
-	if pov == "" {
-		return ""
-	}
-	if i18n.NormalizeLanguage(lang) == i18n.LangEN {
-		return "[Narrative POV] " + pov
-	}
-	return "【叙述视角】" + pov
-}
-
 func formatExtraWritingConstraintsBlock(constraints, lang string) string {
 	constraints = strings.TrimSpace(constraints)
 	if constraints == "" {
@@ -587,11 +576,6 @@ func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig,
 		"Memory":             memoryContext,
 		"OutlineConstraints": outlineConstraints,
 	})
-	userPrompt = finalizeChapterWritingPrompt(cfg.Prompts.ChapterWriting, userPrompt, minLen, maxLen, targetWords, lang)
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterWriting, userPrompt, "{{.OutlineConstraints}}", outlineConstraints)
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterWriting, userPrompt, "{{.Foreshadows}}", foreshadowContext)
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterWriting, userPrompt, "{{.Memory}}", memoryContext)
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterWriting, userPrompt, "{{.WritingPOV}}", formatWritingPOVBlock(cfg.Story.WritingPOV, lang))
 	if block := formatExtraWritingConstraintsBlock(extraWritingConstraints, lang); block != "" {
 		userPrompt += "\n\n" + block
 	}
@@ -689,28 +673,6 @@ func generateChapterFactCheck(ctx context.Context, apiCfg *config.APIConfig, cfg
 		"OutlineConstraints": outlineConstraints,
 		"Memory":             memoryContext,
 	})
-	// Old-template fallback: if placeholder is missing, append the material and supplementary checks at the end.
-	if i18n.NormalizeLanguage(lang) == i18n.LangEN {
-		userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.ChapterOutline}}",
-			"[Chapter outline]\n"+ch.Outline)
-		if outlineConstraints != "" {
-			userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.OutlineConstraints}}",
-				outlineConstraints+"Supplementary audit scope (also count as reportable objective contradictions): (a) premature introduction of characters/events scheduled for later chapters per the outline; (b) one-time events from prior chapters (first meetings, identity reveals, etc.) being re-enacted as new in this chapter.")
-		}
-		if memoryContext != "" {
-			userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.Memory}}", memoryContext)
-		}
-	} else {
-		userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.ChapterOutline}}",
-			"【本章大纲】\n"+ch.Outline)
-		if outlineConstraints != "" {
-			userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.OutlineConstraints}}",
-				outlineConstraints+"补充核查范围（同样属于必须报告的客观矛盾）：(a) 提前引入按章节脉络安排在后续章节才登场或发生的人物/事件；(b) 前文已发生的一次性事件（初次见面、身份揭示等）在本章作为新事件重复发生。")
-		}
-		if memoryContext != "" {
-			userPrompt = appendIfMissingPlaceholder(cfg.Prompts.FactCheck, userPrompt, "{{.Memory}}", memoryContext)
-		}
-	}
 
 	systemPrompt := i18n.SystemPromptFor(lang, "fact_checker_json")
 	return llm.CallAPI(ctx, apiCfg, systemPrompt, userPrompt)
@@ -860,7 +822,6 @@ func reviseChapterSegment(ctx context.Context, apiCfg *config.APIConfig, cfg *co
 		"SegmentOriginal":  segmentOriginal,
 		"UserFeedback":     feedbackForAI,
 	})
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterSegmentRevision, userPrompt, "{{.WritingPOV}}", formatWritingPOVBlock(cfg.Story.WritingPOV, lang))
 
 	systemPrompt := state.CorePrompt
 	if systemPrompt == "" {
@@ -922,7 +883,6 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 		"OriginalContent":  ch.Content,
 		"UserFeedback":     userFeedback,
 	})
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.WritingPOV}}", formatWritingPOVBlock(cfg.Story.WritingPOV, lang))
 
 	systemPrompt := state.CorePrompt
 	if systemPrompt == "" {
@@ -1007,16 +967,6 @@ func reviseSubsequentOutlines(ctx context.Context, apiCfg *config.APIConfig, cfg
 
 // futureOutlineWindow 注入后续章节大纲的窗口大小（章数）
 const futureOutlineWindow = 10
-
-// appendIfMissingPlaceholder 旧项目兼容兜底：prompts 随 config.json 持久化，
-// 老项目存的是没有新占位符的旧模板，applyDefaults 只在字段为空时回填。
-// 若模板中缺少占位符，则把内容块追加到渲染结果末尾，保证新上下文仍然生效。
-func appendIfMissingPlaceholder(template, rendered, placeholder, block string) string {
-	if strings.TrimSpace(block) == "" || strings.Contains(template, placeholder) {
-		return rendered
-	}
-	return rendered + "\n\n" + strings.TrimSpace(block)
-}
 
 func buildHistorySummary(state *Progress, idx int) string {
 	return buildHistorySummaryForLang(state, idx, i18n.LangZH)

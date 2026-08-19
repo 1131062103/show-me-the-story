@@ -96,8 +96,7 @@ func generateOutline(ctx context.Context, apiCfg *config.APIConfig, cfg *config.
 	var lastResp *OutlineResponse
 	var lastShort []int
 	for attempt := 0; attempt < outlineGenMaxAttempts; attempt++ {
-		userPrompt := finalizeOutlinePrompt(cfg.Prompts.OutlineGeneration,
-			config.RenderPrompt(cfg.Prompts.OutlineGeneration, data), cfg, settings)
+		userPrompt := config.RenderPrompt(cfg.Prompts.OutlineGeneration, data)
 		if attempt > 0 {
 			userPrompt += formatShortOutlineRetryFeedback(lastShort, minLen, cfg.Language)
 		}
@@ -148,7 +147,7 @@ func generateOutlineChaptersOnly(ctx context.Context, apiCfg *config.APIConfig, 
 	var lastChapters []OutlineChapter
 	var lastShort []int
 	for attempt := 0; attempt < outlineGenMaxAttempts; attempt++ {
-		userPrompt := finalizeOutlinePrompt(template, config.RenderPrompt(template, data), cfg, settings)
+		userPrompt := config.RenderPrompt(template, data)
 		if attempt > 0 {
 			userPrompt += formatShortOutlineRetryFeedback(lastShort, minLen, cfg.Language)
 		}
@@ -214,8 +213,7 @@ func reviseOutline(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Co
 	var resp OutlineResponse
 	var lastShort []int
 	for attempt := 0; attempt < outlineGenMaxAttempts; attempt++ {
-		userPrompt := finalizeOutlinePrompt(cfg.Prompts.OutlineRevision,
-			config.RenderPrompt(cfg.Prompts.OutlineRevision, data), cfg, settings)
+		userPrompt := config.RenderPrompt(cfg.Prompts.OutlineRevision, data)
 		if attempt > 0 {
 			userPrompt += formatShortOutlineRetryFeedback(lastShort, minLen, lang)
 		}

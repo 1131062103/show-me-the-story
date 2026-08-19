@@ -319,7 +319,6 @@ func GenerateArcSkeletonAction(ctx context.Context, apiCfg *config.APIConfig, cf
 		"StorySynopsis": cfg.Story.StorySynopsis,
 	}, cfg, settings)
 	userPrompt := config.RenderPrompt(cfg.Prompts.ArcSkeleton, data)
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ArcSkeleton, userPrompt, "{{.CharacterList}}", formatCharacterListForOutline(settings, cfg.Language))
 	systemPrompt := i18n.SystemPromptFor(cfg.Language, "outline_editor_json")
 
 	rawResp := llm.CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)

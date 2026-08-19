@@ -199,7 +199,6 @@ func ReviseBlockAction(ctx context.Context, apiCfg *config.APIConfig, cfg *confi
 		"SegmentOriginal":  original,
 		"UserFeedback":     feedbackForAI,
 	})
-	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterSegmentRevision, userPrompt, "{{.WritingPOV}}", formatWritingPOVBlock(cfg.Story.WritingPOV, lang))
 
 	systemPrompt := state.CorePrompt
 	if systemPrompt == "" {

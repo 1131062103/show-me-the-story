@@ -229,8 +229,7 @@ func saveAPIConfig(path string, cfg *APIConfig) error {
 	return fsutil.WriteFileAtomic(path, data)
 }
 
-// LoadAPIProfiles loads the api.json store. Legacy files holding a single
-// APIConfig are transparently migrated to a "default" profile and written back.
+// LoadAPIProfiles loads the api.json profile store.
 func LoadAPIProfiles(path string) (*APIProfiles, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -242,27 +241,6 @@ func LoadAPIProfiles(path string) (*APIProfiles, error) {
 			return p, nil
 		}
 		return nil, fmt.Errorf("读取API配置文件失败: %w", err)
-	}
-
-	var probe map[string]json.RawMessage
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return nil, fmt.Errorf("解析API配置文件失败: %w", err)
-	}
-
-	// Legacy single-config layout (no "profiles" key): migrate it.
-	if _, isProfiles := probe["profiles"]; !isProfiles {
-		var single APIConfig
-		if err := json.Unmarshal(data, &single); err != nil {
-			return nil, fmt.Errorf("解析API配置文件失败: %w", err)
-		}
-		normalizeAPIConfig(&single)
-		p := NewAPIProfiles()
-		p.Profiles["default"] = &single
-		p.Active = "default"
-		if saveErr := SaveAPIProfiles(path, p); saveErr != nil {
-			return nil, fmt.Errorf("迁移API配置文件失败: %w", saveErr)
-		}
-		return p, nil
 	}
 
 	var p APIProfiles
