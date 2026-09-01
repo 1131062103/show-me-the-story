@@ -219,9 +219,86 @@
       localPrompts = empty;
     });
   }
+
+  // —— Legado 阅读（书源）——
+  // 无需后端配置：书源里的地址由服务端按"访问本站的地址"自动生成，
+  // 这里只是把可粘贴的地址与书源 JSON 展示、复制给用户。
+  $: origin = typeof window !== 'undefined' ? window.location.origin : '';
+  $: legadoUrl = origin ? origin + '/api/legado/book-source.json' : '';
+  let legadoJson = '';
+  let loadingLegadoJson = false;
+
+  onMount(async () => {
+    try { apiProfiles.set(await api('GET', '/api/config/api/profiles')); } catch (e) {}
+    try { config.set(await api('GET', '/api/config')); } catch (e) {}
+    loadLegadoJson();
+  });
+
+  async function loadLegadoJson() {
+    if (!origin) return;
+    loadingLegadoJson = true;
+    try {
+      const r = await fetch('/api/legado/book-source.json');
+      if (r.ok) legadoJson = await r.text();
+    } catch (e) {
+      legadoJson = '';
+    } finally {
+      loadingLegadoJson = false;
+    }
+  }
+
+  async function copyLegadoUrl() {
+    try {
+      await navigator.clipboard.writeText(legadoUrl);
+      addToast($t('system.legado.copied'), 'success');
+    } catch (e) { /* clipboard may be unavailable over plain http */ }
+  }
 </script>
 
 <div class="space-y-3">
+  <!-- Legado 阅读（书源）：让手机上的开源阅读软件直接读本站的小说 -->
+  <div class="card bg-base-200 shadow-sm">
+    <div class="card-body p-4 gap-2">
+      <h3 class="card-title text-base">{$t('system.legado.title')}</h3>
+      <p class="text-xs text-base-content/45">{$t('system.legado.hint')}</p>
+      <p class="text-xs text-base-content/40">
+        <span class="text-base-content/50">{$t('system.legado.currentOrigin')}</span>
+        <code class="font-mono text-primary/90 break-all">{origin || '—'}</code>
+      </p>
+      <div>
+        <span class="text-xs text-base-content/50 mb-0.5 block">{$t('system.legado.pasteUrl.label')}</span>
+        <div class="flex items-center gap-2 flex-wrap">
+          <code class="font-mono text-sm bg-base-300 rounded-lg px-2 py-1 break-all flex-1">{legadoUrl}</code>
+          <button class="btn btn-primary btn-xs" on:click={copyLegadoUrl} disabled={!legadoUrl}>{$t('system.legado.copyUrl')}</button>
+          <a class="btn btn-outline btn-xs" href={legadoUrl} target="_blank" rel="noopener">{$t('system.legado.open')}</a>
+        </div>
+      </div>
+
+      <details>
+        <summary class="cursor-pointer text-xs text-base-content/60 select-none">{$t('system.legado.manual')}</summary>
+        <pre class="mt-1 text-[11px] font-mono bg-base-300 rounded-lg p-2 overflow-auto max-h-64 leading-relaxed text-base-content/80 whitespace-pre-wrap break-all">
+{#if loadingLegadoJson}
+  <span class="loading loading-spinner loading-xs"></span>
+{:else}
+{legadoJson}
+{/if}
+        </pre>
+      </details>
+
+      <div class="text-xs text-base-content/50 space-y-0.5 mt-1">
+        <span class="font-medium text-base-content/60">{$t('system.legado.tooltip')}</span>
+        <div class="opacity-70 space-y-0.5">
+          <div>{$t('system.legado.notes.title')}</div>
+          <ul class="list-disc pl-4 space-y-0.5">
+            <li>{$t('system.legado.notes.l1')}</li>
+            <li>{$t('system.legado.notes.l2')}</li>
+            <li>{$t('system.legado.notes.l3')}</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- API 配置（多配置管理） -->
   <div class="card bg-base-200 shadow-sm">
     <div class="card-body p-4 gap-2">

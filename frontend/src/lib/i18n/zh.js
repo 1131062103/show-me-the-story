@@ -484,6 +484,21 @@ export default {
   'system.api.modelsEmpty': '接口未返回模型列表，可手动输入模型名。',
   'system.api.modelsNeedUrl': '请先填写 API Base URL 再拉取模型',
 
+  // Legado 阅读（书源）
+  'system.legado.title': 'Legado（开源阅读）同步阅读',
+  'system.legado.hint': '在手机/平板上的 Legado（开源阅读）里，用「我的 → 书源管理 → 网络导入」粘贴下面的地址，即可在书架里搜索并直接阅读本项目的所有小说——无论章节是否写完。',
+  'system.legado.currentOrigin': '你当前正通过以下地址访问本站：',
+  'system.legado.pasteUrl.label': '要粘贴进 Legado 的书源地址：',
+  'system.legado.copied': '书源地址已复制',
+  'system.legado.copyUrl': '复制书源地址',
+  'system.legado.open': '在浏览器打开验证',
+  'system.legado.manual': '也可以手动导入以下书源 JSON：',
+  'system.legado.tooltip': '浏览器访问本页所用的地址（局域网 IP、域名或 Cloudflare Tunnel 等）会原样进入书源；用哪个地址访问，Legado 就用哪个地址读取。',
+  'system.legado.notes.title': '使用说明',
+  'system.legado.notes.l1': '先把服务器以局域网 IP、IPv6、域名或 Cloudflare Tunnel 等方式暴露给你的设备（与浏览器打开本站用同一个地址）。',
+  'system.legado.notes.l2': '复制上面的地址，在 Legado「书源管理 → 网络导入」粘贴并确认。',
+  'system.legado.notes.l3': '导入后即可用书源搜索本项目的小说并阅读；写完的章节和正在生成的草稿都能看。',
+
   'system.prompts.title': 'AI 写作提示词',
   'system.prompts.hint': '提示词与项目语言绑定（保存在当前项目的 config.json 中），修改后对后续 AI 调用立即生效。清空字段会自动回填默认模板。',
   'system.prompts.resetAll': '清空全部（恢复默认）',

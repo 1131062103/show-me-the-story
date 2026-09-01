@@ -480,6 +480,21 @@ export default {
   'system.api.modelsEmpty': 'This endpoint returned no models. You can type one manually.',
   'system.api.modelsNeedUrl': 'Fill in the API Base URL first, then fetch models',
 
+  // Legado reading (book source)
+  'system.legado.title': 'Legado (read on the go)',
+  'system.legado.hint': 'In Legado on your phone/tablet, go to "Book sources → Import via URL" and paste the address below to search and read every novel on this server directly — finished chapters and in-progress drafts alike.',
+  'system.legado.currentOrigin': 'You are currently accessing this site via:',
+  'system.legado.pasteUrl.label': 'Paste this into Legado:',
+  'system.legado.copied': 'Book source address copied',
+  'system.legado.copyUrl': 'Copy address',
+  'system.legado.open': 'Open in browser to verify',
+  'system.legado.manual': 'Or import this book-source JSON manually:',
+  'system.legado.tooltip': 'The address you use to open this page (LAN IP, domain or Cloudflare Tunnel, etc.) is carried into the book source; Legado reads from whatever address you used.',
+  'system.legado.notes.title': 'How it works',
+  'system.legado.notes.l1': 'Expose this server to your device the same way you open the site in a browser (LAN IP, IPv6, domain, or Cloudflare Tunnel).',
+  'system.legado.notes.l2': 'Copy the address above and paste it into Legado under "Book sources → Import via URL".',
+  'system.legado.notes.l3': 'You can then search this server’s novels in Legado and read both finished chapters and in-progress drafts.',
+
   'system.prompts.title': 'AI writing prompts',
   'system.prompts.hint': 'Prompts are bound to the project language (stored in this project\'s config.json) and take effect immediately for subsequent AI calls. Empty fields automatically fall back to the default templates.',
   'system.prompts.resetAll': 'Reset all to defaults',

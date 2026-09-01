@@ -150,6 +150,13 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 	mux.HandleFunc("POST /api/import/resume", h.PostImportResume)
 	mux.HandleFunc("GET /api/import/status", h.GetImportStatus)
 
+	// Legado (开源阅读) 书源：让未改动的 Legado 客户端通过网络导入书源阅读本站。
+	// 仅"主动输出"旁路数据，不参与本项目自身的任务/状态管理。
+	mux.HandleFunc("GET /api/legado/book-source.json", h.GetLegadoBookSource)
+	mux.HandleFunc("GET /api/legado/search", h.GetLegadoSearch)
+	mux.HandleFunc("GET /api/legado/book/{project}", h.GetLegadoBook)
+	mux.HandleFunc("GET /api/legado/chapter/{project}/{num}", h.GetLegadoChapter)
+
 	mux.HandleFunc("GET /api/skills", h.GetSkills)
 	mux.HandleFunc("PUT /api/skills/{id}/toggle", h.PutSkillToggle)
 
