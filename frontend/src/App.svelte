@@ -17,6 +17,7 @@
   import Memory from './pages/Memory.svelte';
   import ChatPanel from './components/ChatPanel.svelte';
   import ConfirmModal from './components/ConfirmModal.svelte';
+  import StorageErrorModal from './components/StorageErrorModal.svelte';
 
   let chatPanel;
 
@@ -286,6 +287,7 @@
   </div>
 
   <ConfirmModal />
+  <StorageErrorModal />
 </div>
 
 <style>

@@ -44,6 +44,10 @@ export const lastFailedTask = writable(null);
 // 存全局 store 使其在切换页面后仍可见；表单内容与 snapshot 不一致时前端自动隐藏。
 export const apiTestResult = writable(null);
 
+// 结构化且无法自动恢复的保存失败(来自 HTTP 错误响应或后台任务 SSE)。
+// 由 StorageErrorModal 消费;存全局 store 使其在任意页面都能弹窗。
+export const storageError = writable(null);
+
 export function addLog(entry) {
   logEntries.update(entries => {
     const next = [...entries, entry];
