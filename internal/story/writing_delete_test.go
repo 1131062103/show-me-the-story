@@ -128,7 +128,7 @@ func TestDeleteFrontierChapterAdjustsPointer(t *testing.T) {
 			{Num: 3, Status: StatusAccepted, Content: "c", Summary: "s"},
 			{Num: 4, Status: StatusPending},
 		},
-		MemoryEntries: []MemoryEntry{{ID: 1, Chapter: 3, Content: "detail"}},
+		MemoryEntries: []MemoryEntry{{ID: 1, Content: "detail", References: []MemoryReference{{Chapter: 3}}}},
 	}
 
 	num, err := DeleteFrontierChapter(state, t.TempDir())
@@ -147,59 +147,4 @@ func TestDeleteFrontierChapterAdjustsPointer(t *testing.T) {
 	if len(state.MemoryEntries) != 0 {
 		t.Fatalf("memory not purged: %+v", state.MemoryEntries)
 	}
-}
-
-func TestRejectChapterAction(t *testing.T) {
-	t.Run("reject clears review chapter and keeps pointer", func(t *testing.T) {
-		state := &Progress{
-			Phase:               "writing",
-			CurrentChapterIndex: 2,
-			Chapters: []ChapterState{
-				{Num: 1, Status: StatusAccepted, Content: "a"},
-				{Num: 2, Status: StatusAccepted, Content: "b"},
-				{Num: 3, Status: StatusReview, Content: "c", Summary: "s", Finalized: true},
-				{Num: 4, Status: StatusPending},
-			},
-			MemoryEntries: []MemoryEntry{{ID: 1, Chapter: 3, Content: "detail"}},
-		}
-
-		num, err := RejectChapterAction(state, t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if num != 3 {
-			t.Fatalf("rejected num = %d, want 3", num)
-		}
-		if state.CurrentChapterIndex != 2 {
-			t.Fatalf("pointer = %d, want 2 (stay on rejected chapter)", state.CurrentChapterIndex)
-		}
-		ch := state.Chapters[2]
-		if ch.Status != StatusPending || ch.Content != "" || ch.Summary != "" || ch.Finalized {
-			t.Fatalf("chapter not cleared: %+v", ch)
-		}
-		if len(state.MemoryEntries) != 0 {
-			t.Fatalf("memory not purged: %+v", state.MemoryEntries)
-		}
-	})
-
-	t.Run("reject non-review chapter errors", func(t *testing.T) {
-		state := &Progress{
-			Phase:               "writing",
-			CurrentChapterIndex: 2,
-			Chapters: []ChapterState{
-				{Num: 1, Status: StatusAccepted, Content: "a"},
-				{Num: 2, Status: StatusAccepted, Content: "b"},
-				{Num: 3, Status: StatusAccepted, Content: "c"},
-			},
-		}
-		if _, err := RejectChapterAction(state, t.TempDir()); err != ErrReviewRejectUnavailable {
-			t.Fatalf("err = %v, want ErrReviewRejectUnavailable", err)
-		}
-	})
-
-	t.Run("reject empty errors", func(t *testing.T) {
-		if _, err := RejectChapterAction(&Progress{Phase: "writing"}, t.TempDir()); err != ErrNoChaptersToDelete {
-			t.Fatalf("err = %v, want ErrNoChaptersToDelete", err)
-		}
-	})
 }

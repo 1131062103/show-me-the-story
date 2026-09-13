@@ -1,10 +1,10 @@
 <script>
   import { onMount } from 'svelte';
   import { api } from '../lib/api.js';
-  import { config, progress, settings, editingCharID, editingWvID, wvFilter, addToast, showConfirm, taskRunning } from '../lib/stores.js';
+  import { apiConfig, config, progress, settings, editingCharID, editingWvID, wvFilter, addToast, showConfirm, taskRunning, apiTestResult } from '../lib/stores.js';
   import { t } from '../lib/i18n/index.js';
+  import { resolveChatCompletionsURL } from '../lib/apiUrl.js';
   import ConfigChangePanel from '../components/ConfigChangePanel.svelte';
-  import ActSelector from '../components/ActSelector.svelte';
 
   export let sendToChat = async () => {};
 
@@ -18,15 +18,12 @@
   let wvCollapse = false;
 
   let charName = '', charAge = '', charAppearance = '', charPersonality = '', charBackground = '', charMotivation = '', charAbilities = '', charNotes = '';
-  let charActs = [];
   let wvName = '', wvCategory = 'other', wvDescription = '', wvTags = '';
-  let wvActs = [];
 
   // 组织管理
   let showOrgForm = false, orgCollapse = false;
   let orgName = '', orgType = '', orgDescription = '';
   let orgMembers = [];
-  let orgActs = [];
   let editingOrgID = null;
 
   // 关系管理
@@ -34,30 +31,31 @@
   let relSource = '', relTarget = '', relLabel = '';
   let editingRelID = null;
 
-  // 幕归属选项：按全书扁平顺序给出全局幕编号（供设定按幕生效）
-  $: actOptions = (() => {
-    const out = [];
-    const arcs = $progress?.arcs || [];
-    arcs.forEach((arc, i) => {
-      (arc.acts || []).forEach((act, j) => {
-        out.push({ gid: out.length + 1, label: `${i + 1}-${j + 1}${act.title ? ' ' + act.title : ''}` });
-      });
-    });
-    return out;
-  })();
+  $: cfgBase = $apiConfig?.base_url || '';
+  $: cfgModel = $apiConfig?.model || '';
+  $: cfgKey = $apiConfig?.api_key || '';
+  $: cfgTimeout = $apiConfig?.http_timeout_seconds || 600;
 
-  $: hasActs = actOptions.length > 0;
+  let localApiCfg = { base_url: '', url_strict: false, model: '', api_key: '', http_timeout_seconds: 600, max_tokens: 32768, context_budget_tokens: 900000 };
+  let localStoryCfg = { type: '', title: '', target_words_per_chapter: 2500, writing_style: '', writing_pov: '' };
+  let testingApi = false;
 
-  $: actLabelByGid = Object.fromEntries(actOptions.map(o => [o.gid, o.label]));
-  function actsLabel(acts) {
-    if (!acts?.length) return '';
-    return acts.map(g => actLabelByGid[g] || ('幕 ' + g)).join(', ');
-  }
+  $: resolvedChatURL = resolveChatCompletionsURL(localApiCfg.base_url, !!localApiCfg.url_strict);
 
-  let localStoryCfg = { type: '', title: '', chapter_count: 30, target_words_per_chapter: 2500, writing_style: '', writing_pov: '', story_synopsis: '' };
-
+  let apiCfgSnapshot = '';
   let storyCfgSnapshot = '';
 
+  $: if ($apiConfig) {
+    const snap = JSON.stringify($apiConfig);
+    if (snap !== apiCfgSnapshot) {
+      localApiCfg = {
+        base_url: '', url_strict: false, model: '', api_key: '', http_timeout_seconds: 600, max_tokens: 32768, context_budget_tokens: 900000,
+        ...$apiConfig,
+        url_strict: !!$apiConfig.url_strict,
+      };
+      apiCfgSnapshot = snap;
+    }
+  }
   $: if ($config?.story) {
     const snap = JSON.stringify($config.story);
     if (snap !== storyCfgSnapshot) {
@@ -103,28 +101,55 @@
     ['geography', $t('config.wv.cat.geography')],
     ['faction', $t('config.wv.cat.faction')],
     ['rule', $t('config.wv.cat.rule')],
+    ['knowledge', $t('config.wv.cat.knowledge')],
     ['history', $t('config.wv.cat.history')],
     ['other', $t('config.wv.cat.other')],
   ];
 
   onMount(async () => {
+    try { apiConfig.set(await api('GET', '/api/config/api')); } catch (e) {}
     try { config.set(await api('GET', '/api/config')); } catch (e) {}
     try { settings.set(await api('GET', '/api/settings')); } catch (e) {}
   });
+
+  async function saveAPIConfig() {
+    try {
+      await api('PUT', '/api/config/api', localApiCfg);
+      apiConfig.set({ ...localApiCfg });
+      addToast($t('config.api.saved'), 'success');
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  // 影响连接测试的字段签名；配置改动后据此自动清除持久化的测试结果
+  const apiTestSig = c => JSON.stringify([c.base_url, !!c.url_strict, c.model, c.api_key, c.http_timeout_seconds, c.max_tokens]);
+  $: if ($apiTestResult && apiTestSig(localApiCfg) !== $apiTestResult.sig) apiTestResult.set(null);
+
+  async function testAPIConfig() {
+    testingApi = true;
+    const sig = apiTestSig(localApiCfg);
+    try {
+      const res = await api('POST', '/api/config/api/test', localApiCfg);
+      apiTestResult.set({ ok: true, model: res.model, sig });
+      addToast($t('config.api.testOk', { model: res.model }), 'success');
+    } catch (e) {
+      apiTestResult.set({ ok: false, error: e.message, sig });
+      addToast(e.message, 'error');
+    } finally {
+      testingApi = false;
+    }
+  }
 
   // 直接保存故事配置（不经过 AI），存在已确认章节且关键设定有变化时提示协调
   async function saveStoryConfig() {
     const prev = $config?.story || {};
     const story = {
       ...localStoryCfg,
-      chapter_count: Number(localStoryCfg.chapter_count) || 30,
       target_words_per_chapter: Number(localStoryCfg.target_words_per_chapter) || 2500,
     };
     const settingsChanged =
       story.type !== prev.type ||
       story.writing_style !== prev.writing_style ||
-      story.writing_pov !== prev.writing_pov ||
-      story.story_synopsis !== prev.story_synopsis;
+      story.writing_pov !== prev.writing_pov;
 
     try {
       const saved = await api('PUT', '/api/config', { ...($config || {}), story });
@@ -142,6 +167,17 @@
     } catch (e) { addToast(e.message, 'error'); }
   }
 
+  let charFormSnapshot = '';
+  function charFormSnapshotNow() {
+    return JSON.stringify({
+      name: charName, age: charAge, appearance: charAppearance, personality: charPersonality,
+      background: charBackground, motivation: charMotivation, abilities: charAbilities, notes: charNotes,
+    });
+  }
+  function isCharFormDirty() {
+    return showCharForm && charFormSnapshotNow() !== charFormSnapshot;
+  }
+
   function openCharForm(char) {
     showCharForm = true;
     if (char) {
@@ -154,25 +190,13 @@
       charMotivation = char.motivation || '';
       charAbilities = char.abilities || '';
       charNotes = char.notes || '';
-      charActs = [...(char.acts || [])];
     } else {
       $editingCharID = null;
       charName = charAge = charAppearance = charPersonality = charBackground = charMotivation = charAbilities = charNotes = '';
-      charActs = [];
     }
     charFormSnapshot = charFormSnapshotNow();
   }
 
-  let charFormSnapshot = '';
-  function charFormSnapshotNow() {
-    return JSON.stringify({
-      name: charName, age: charAge, appearance: charAppearance, personality: charPersonality,
-      background: charBackground, motivation: charMotivation, abilities: charAbilities, notes: charNotes, acts: charActs,
-    });
-  }
-  function isCharFormDirty() {
-    return showCharForm && charFormSnapshotNow() !== charFormSnapshot;
-  }
   function requestNewChar() {
     if (isCharFormDirty()) {
       showConfirm($t('config.form.unsavedNew'), () => openCharForm(null));
@@ -188,7 +212,7 @@
 
   async function saveCharacter() {
     if (!charName.trim()) { addToast($t('config.char.nameRequired'), 'error'); return; }
-    const data = { name: charName.trim(), age: charAge, appearance: charAppearance, personality: charPersonality, background: charBackground, motivation: charMotivation, abilities: charAbilities, notes: charNotes, acts: charActs };
+    const data = { name: charName.trim(), age: charAge, appearance: charAppearance, personality: charPersonality, background: charBackground, motivation: charMotivation, abilities: charAbilities, notes: charNotes };
     try {
       if ($editingCharID) {
         await api('PUT', '/api/characters/' + $editingCharID, data);
@@ -218,6 +242,14 @@
     addToast($t('config.char.submitted'), 'success');
   }
 
+  let wvFormSnapshot = '';
+  function wvFormSnapshotNow() {
+    return JSON.stringify({ name: wvName, category: wvCategory, description: wvDescription, tags: wvTags });
+  }
+  function isWvFormDirty() {
+    return showWvForm && wvFormSnapshotNow() !== wvFormSnapshot;
+  }
+
   function openWvForm(item) {
     showWvForm = true;
     if (item) {
@@ -226,22 +258,13 @@
       wvCategory = item.category || 'other';
       wvDescription = item.description || '';
       wvTags = item.tags || '';
-      wvActs = [...(item.acts || [])];
     } else {
       $editingWvID = null;
       wvName = ''; wvCategory = 'other'; wvDescription = ''; wvTags = '';
-      wvActs = [];
     }
     wvFormSnapshot = wvFormSnapshotNow();
   }
 
-  let wvFormSnapshot = '';
-  function wvFormSnapshotNow() {
-    return JSON.stringify({ name: wvName, category: wvCategory, description: wvDescription, tags: wvTags, acts: wvActs });
-  }
-  function isWvFormDirty() {
-    return showWvForm && wvFormSnapshotNow() !== wvFormSnapshot;
-  }
   function requestNewWv() {
     if (isWvFormDirty()) {
       showConfirm($t('config.form.unsavedNew'), () => openWvForm(null));
@@ -257,7 +280,7 @@
 
   async function saveWorldview() {
     if (!wvName.trim() || !wvDescription.trim()) { addToast($t('config.wv.requiredFields'), 'error'); return; }
-    const data = { name: wvName.trim(), category: wvCategory, description: wvDescription.trim(), tags: wvTags, acts: wvActs };
+    const data = { name: wvName.trim(), category: wvCategory, description: wvDescription.trim(), tags: wvTags };
     try {
       if ($editingWvID) {
         await api('PUT', '/api/worldview/' + $editingWvID, data);
@@ -288,6 +311,14 @@
   }
 
   // —— 组织 CRUD ——
+  let orgFormSnapshot = '';
+  function orgFormSnapshotNow() {
+    return JSON.stringify({ name: orgName, type: orgType, description: orgDescription, members: orgMembers });
+  }
+  function isOrgFormDirty() {
+    return showOrgForm && orgFormSnapshotNow() !== orgFormSnapshot;
+  }
+
   function openOrgForm(org) {
     showOrgForm = true;
     if (org) {
@@ -296,23 +327,14 @@
       orgType = org.type || '';
       orgDescription = org.description || '';
       orgMembers = [...(org.members || [])];
-      orgActs = [...(org.acts || [])];
     } else {
       editingOrgID = null;
       orgName = orgType = orgDescription = '';
       orgMembers = [];
-      orgActs = [];
     }
     orgFormSnapshot = orgFormSnapshotNow();
   }
 
-  let orgFormSnapshot = '';
-  function orgFormSnapshotNow() {
-    return JSON.stringify({ name: orgName, type: orgType, description: orgDescription, members: orgMembers, acts: orgActs });
-  }
-  function isOrgFormDirty() {
-    return showOrgForm && orgFormSnapshotNow() !== orgFormSnapshot;
-  }
   function requestNewOrg() {
     if (isOrgFormDirty()) {
       showConfirm($t('config.form.unsavedNew'), () => openOrgForm(null));
@@ -328,7 +350,7 @@
 
   async function saveOrganization() {
     if (!orgName.trim()) { addToast($t('config.org.nameRequired'), 'error'); return; }
-    const data = { name: orgName.trim(), type: orgType, description: orgDescription, members: orgMembers, acts: orgActs };
+    const data = { name: orgName.trim(), type: orgType, description: orgDescription, members: orgMembers };
     try {
       if (editingOrgID) {
         await api('PUT', '/api/organizations/' + editingOrgID, data);
@@ -357,6 +379,14 @@
     return { type: key.slice(0, i), id: key.slice(i + 1) };
   }
 
+  let relFormSnapshot = '';
+  function relFormSnapshotNow() {
+    return JSON.stringify({ source: relSource, target: relTarget, label: relLabel });
+  }
+  function isRelFormDirty() {
+    return showRelForm && relFormSnapshotNow() !== relFormSnapshot;
+  }
+
   function openRelForm(rel) {
     showRelForm = true;
     if (rel) {
@@ -372,13 +402,6 @@
     relFormSnapshot = relFormSnapshotNow();
   }
 
-  let relFormSnapshot = '';
-  function relFormSnapshotNow() {
-    return JSON.stringify({ source: relSource, target: relTarget, label: relLabel });
-  }
-  function isRelFormDirty() {
-    return showRelForm && relFormSnapshotNow() !== relFormSnapshot;
-  }
   function requestNewRel() {
     if (isRelFormDirty()) {
       showConfirm($t('config.form.unsavedNew'), () => openRelForm(null));
@@ -424,41 +447,96 @@
 
 <div class="space-y-3">
   <ConfigChangePanel />
-  <!-- 故事设定：基础信息 -->
-  <div class="card bg-base-200 shadow-sm">
-    <div class="card-body p-4 gap-2">
-      <h3 class="card-title text-base">{$t('config.story.title')}</h3>
-      {#if hasAccepted}
-        <div class="alert alert-warning text-xs py-1.5 px-3">
-          <span>{$t('config.story.acceptedHint')}</span>
+  <!-- API + Story Config: side by side -->
+  <div class="grid grid-cols-1 @3xl:grid-cols-2 gap-4">
+    <div class="card bg-base-200">
+      <div class="card-body p-4 gap-2">
+        <h3 class="card-title text-base">{$t('config.api.title')}</h3>
+        <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+          <div class="col-span-2">
+            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.baseUrl')}</span>
+            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.openai.com/v1" disabled={$taskRunning || testingApi} />
+            <label class="label cursor-pointer justify-start gap-2 py-1 px-0 min-h-0">
+              <input type="checkbox" class="toggle toggle-xs" bind:checked={localApiCfg.url_strict} disabled={$taskRunning || testingApi} />
+              <span class="text-xs text-base-content/60">{$t('config.api.urlStrict')}</span>
+            </label>
+            <p class="text-xs text-base-content/45 mb-1">{$t('config.api.urlStrictHint')}</p>
+            {#if resolvedChatURL}
+              <p class="text-xs text-base-content/50 break-all">
+                {$t('config.api.resolvedUrl')}: <code class="font-mono text-primary/80">{resolvedChatURL}</code>
+              </p>
+            {/if}
+          </div>
+          <div>
+            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.model')}</span>
+            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi} />
+          </div>
+          <div>
+            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.timeout')}</span>
+            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.http_timeout_seconds} disabled={$taskRunning || testingApi} />
+          </div>
+          <div>
+            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.maxTokens')}</span>
+            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.max_tokens} placeholder="{$t('config.api.maxTokens.placeholder')}" disabled={$taskRunning || testingApi} title={$t('config.api.maxTokens.tooltip')} />
+          </div>
+          <div class="col-span-2">
+            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.key')}</span>
+            <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi} />
+          </div>
         </div>
-      {/if}
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
-        <div>
-          <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.type')}</span>
-          <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.type} placeholder={$t('config.story.type.placeholder')} disabled={$taskRunning} />
-        </div>
-        <div>
-          <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.titleField')}</span>
-          <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.title} placeholder={$t('config.story.title.placeholder')} disabled={$taskRunning} />
-        </div>
-        <div>
-          <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.chapterCount')}</span>
-          <input type="number" class="input input-sm w-full" bind:value={localStoryCfg.chapter_count} disabled={$taskRunning} />
-        </div>
-        <div>
-          <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.targetWords')}</span>
-          <input type="number" class="input input-sm w-full" bind:value={localStoryCfg.target_words_per_chapter} disabled={$taskRunning} />
+        {#if $apiTestResult}
+          <div class="text-xs rounded-md border px-2.5 py-1.5 {$apiTestResult.ok ? 'border-success/40 bg-success/10 text-success' : 'border-error/40 bg-error/10 text-error'}">
+            {#if $apiTestResult.ok}
+              ✓ {$t('config.api.testResultOk', { model: $apiTestResult.model })}
+            {:else}
+              ✕ {$t('config.api.testResultFail', { error: $apiTestResult.error })}
+            {/if}
+          </div>
+        {/if}
+        <div class="flex justify-end gap-2">
+          <button class="btn btn-xs {$apiTestResult ? ($apiTestResult.ok ? 'btn-success btn-outline' : 'btn-error btn-outline') : 'btn-outline border-base-content/35 hover:border-primary hover:bg-primary hover:text-primary-content'}" on:click={testAPIConfig} disabled={$taskRunning || testingApi}>
+            {#if testingApi}
+              <span class="loading loading-spinner loading-xs"></span>{$t('config.api.testing')}
+            {:else}
+              {$t('config.api.test')}
+            {/if}
+          </button>
+          <button class="btn btn-primary btn-xs" on:click={saveAPIConfig} disabled={$taskRunning || testingApi}>{$t('common.save')}</button>
         </div>
       </div>
-      <div class="flex justify-end">
-        <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
+    </div>
+
+    <div class="card bg-base-200">
+      <div class="card-body p-4 gap-2">
+        <h3 class="card-title text-base">{$t('config.story.title')}</h3>
+        {#if hasAccepted}
+          <div class="alert alert-warning text-xs py-1.5 px-3">
+            <span>{$t('config.story.acceptedHint')}</span>
+          </div>
+        {/if}
+        <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+          <div>
+            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.type')}</span>
+            <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.type} placeholder={$t('config.story.type.placeholder')} disabled={$taskRunning} />
+          </div>
+          <div>
+            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.titleField')}</span>
+            <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.title} placeholder={$t('config.story.title.placeholder')} disabled={$taskRunning} />
+          </div>
+          <div>
+            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.targetWords')}</span>
+            <input type="number" class="input input-sm w-full" bind:value={localStoryCfg.target_words_per_chapter} disabled={$taskRunning} />
+          </div>
+        </div>
+        <div class="flex justify-end">
+          <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Writing Style & POV -->
-  <div class="card bg-base-200 shadow-sm">
+  <div class="card bg-base-200">
     <div class="card-body p-4 gap-2">
       <h3 class="card-title text-base">{$t('config.style.title')}</h3>
       <div>
@@ -475,19 +553,8 @@
     </div>
   </div>
 
-  <!-- Story Synopsis -->
-  <div class="card bg-base-200 shadow-sm">
-    <div class="card-body p-4 gap-2">
-      <h3 class="card-title text-base">{$t('config.synopsis.title')}</h3>
-      <textarea class="textarea w-full h-40 text-base" bind:value={localStoryCfg.story_synopsis} placeholder={$t('config.synopsis.placeholder')} disabled={$taskRunning}></textarea>
-      <div class="flex justify-end">
-        <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Characters -->
-  <div class="card bg-base-200 shadow-sm">
+  <div class="card bg-base-200">
     <div class="card-body p-4 gap-2">
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -496,7 +563,7 @@
         <svg class="w-4 h-4 text-base-content/40 transition-transform" class:rotate-180={charCollapse} viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
       </div>
       {#if !charCollapse}
-        <div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
           {#if chars.length === 0}
             <p class="text-xs text-base-content/40 col-span-full py-2">{$t('config.char.empty')}</p>
           {:else}
@@ -506,13 +573,10 @@
                 <div class="flex-1 min-w-0">
                   <div class="text-sm font-medium truncate">{stripNameMarks(c.name)}</div>
                   <div class="text-xs text-base-content/40 line-clamp-1">{c.personality || c.background || c.age || ''}</div>
-                  {#if (c.acts || []).length}
-                    <div class="text-[11px] text-primary/70 mt-0.5 truncate">{$t('config.acts.on')}: {actsLabel(c.acts)}</div>
-                  {/if}
                 </div>
                 <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                  <button class="btn btn-ghost btn-xs px-1" on:click={() => openCharForm(c)} disabled={$taskRunning}>{$t('common.edit')}</button>
-                  <button class="btn btn-ghost btn-xs px-1 text-error" on:click={() => deleteCharacter(c.id)} disabled={$taskRunning}>{$t('common.delete')}</button>
+                  <button class="btn btn-outline btn-xs px-1" on:click={() => openCharForm(c)} disabled={$taskRunning}>{$t('common.edit')}</button>
+                  <button class="btn btn-error btn-outline btn-xs px-1" on:click={() => deleteCharacter(c.id)} disabled={$taskRunning}>{$t('common.delete')}</button>
                 </div>
               </div>
             {/each}
@@ -521,7 +585,7 @@
 
         {#if showCharForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.char.name')}</span>
                 <input type="text" class="input input-sm w-full" bind:value={charName} disabled={$taskRunning} />
@@ -531,7 +595,7 @@
                 <input type="text" class="input input-sm w-full" bind:value={charAge} disabled={$taskRunning} />
               </div>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.char.appearance')}</span>
                 <textarea class="textarea textarea-sm w-full h-14 text-sm" bind:value={charAppearance} disabled={$taskRunning}></textarea>
@@ -557,13 +621,6 @@
                 <textarea class="textarea textarea-sm w-full h-14 text-sm" bind:value={charNotes} disabled={$taskRunning}></textarea>
               </div>
             </div>
-            {#if hasActs}
-              <div>
-                <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.acts.label')}</span>
-                <ActSelector options={actOptions} bind:value={charActs} disabled={$taskRunning} />
-                <p class="text-[11px] text-base-content/35 mt-0.5">{$t('config.acts.hint')}</p>
-              </div>
-            {/if}
             <div class="flex gap-1.5">
               <button class="btn btn-success btn-xs" on:click={saveCharacter} disabled={$taskRunning}>{$t('config.char.save')}</button>
               <button class="btn btn-ghost btn-xs" on:click={closeCharForm}>{$t('common.cancel')}</button>
@@ -582,7 +639,7 @@
   </div>
 
   <!-- Worldview -->
-  <div class="card bg-base-200 shadow-sm">
+  <div class="card bg-base-200">
     <div class="card-body p-4 gap-2">
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -599,7 +656,7 @@
           {/each}
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
           {#if filteredWvs.length === 0}
             <p class="text-xs text-base-content/40 col-span-full py-2">{$t('config.wv.empty')}</p>
           {:else}
@@ -609,13 +666,10 @@
                 <div class="flex-1 min-w-0">
                   <div class="text-sm font-medium truncate">{w.name} <span class="text-xs font-normal text-base-content/30">[{catLabels[w.category] || w.category}]</span></div>
                   <div class="text-xs text-base-content/40 line-clamp-1">{w.description}</div>
-                  {#if (w.acts || []).length}
-                    <div class="text-[11px] text-primary/70 mt-0.5 truncate">{$t('config.acts.on')}: {actsLabel(w.acts)}</div>
-                  {/if}
                 </div>
                 <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                  <button class="btn btn-ghost btn-xs px-1" on:click={() => openWvForm(w)} disabled={$taskRunning}>{$t('common.edit')}</button>
-                  <button class="btn btn-ghost btn-xs px-1 text-error" on:click={() => deleteWorldview(w.id)} disabled={$taskRunning}>{$t('common.delete')}</button>
+                  <button class="btn btn-outline btn-xs px-1" on:click={() => openWvForm(w)} disabled={$taskRunning}>{$t('common.edit')}</button>
+                  <button class="btn btn-error btn-outline btn-xs px-1" on:click={() => deleteWorldview(w.id)} disabled={$taskRunning}>{$t('common.delete')}</button>
                 </div>
               </div>
             {/each}
@@ -624,7 +678,7 @@
 
         {#if showWvForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.wv.name')}</span>
                 <input type="text" class="input input-sm w-full" bind:value={wvName} disabled={$taskRunning} />
@@ -635,6 +689,7 @@
                   <option value="geography">{$t('config.wv.cat.geography')}</option>
                   <option value="faction">{$t('config.wv.cat.faction')}</option>
                   <option value="rule">{$t('config.wv.cat.rule')}</option>
+                  <option value="knowledge">{$t('config.wv.cat.knowledge')}</option>
                   <option value="history">{$t('config.wv.cat.history')}</option>
                   <option value="other">{$t('config.wv.cat.other')}</option>
                 </select>
@@ -648,13 +703,6 @@
               <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.wv.tags')}</span>
               <input type="text" class="input input-sm w-full" bind:value={wvTags} placeholder={$t('config.wv.tags.placeholder')} disabled={$taskRunning} />
             </div>
-            {#if hasActs}
-              <div>
-                <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.acts.label')}</span>
-                <ActSelector options={actOptions} bind:value={wvActs} disabled={$taskRunning} />
-                <p class="text-[11px] text-base-content/35 mt-0.5">{$t('config.acts.hint')}</p>
-              </div>
-            {/if}
             <div class="flex gap-1.5">
               <button class="btn btn-success btn-xs" on:click={saveWorldview} disabled={$taskRunning}>{$t('common.save')}</button>
               <button class="btn btn-ghost btn-xs" on:click={closeWvForm}>{$t('common.cancel')}</button>
@@ -673,7 +721,7 @@
   </div>
 
   <!-- Organizations -->
-  <div class="card bg-base-200 shadow-sm">
+  <div class="card bg-base-200">
     <div class="card-body p-4 gap-2">
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -682,7 +730,7 @@
         <svg class="w-4 h-4 text-base-content/40 transition-transform" class:rotate-180={orgCollapse} viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
       </div>
       {#if !orgCollapse}
-        <div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
           {#if orgs.length === 0}
             <p class="text-xs text-base-content/40 col-span-full py-2">{$t('config.org.empty')}</p>
           {:else}
@@ -695,13 +743,10 @@
                   {#if (o.members || []).length > 0}
                     <div class="text-xs text-base-content/35 line-clamp-1 mt-0.5">{$t('config.org.membersList', { names: (o.members || []).map(id => nameById[id] || id).join(', ') })}</div>
                   {/if}
-                  {#if (o.acts || []).length}
-                    <div class="text-[11px] text-primary/70 mt-0.5 truncate">{$t('config.acts.on')}: {actsLabel(o.acts)}</div>
-                  {/if}
                 </div>
                 <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                  <button class="btn btn-ghost btn-xs px-1" on:click={() => openOrgForm(o)} disabled={$taskRunning}>{$t('common.edit')}</button>
-                  <button class="btn btn-ghost btn-xs px-1 text-error" on:click={() => deleteOrganization(o.id)} disabled={$taskRunning}>{$t('common.delete')}</button>
+                  <button class="btn btn-outline btn-xs px-1" on:click={() => openOrgForm(o)} disabled={$taskRunning}>{$t('common.edit')}</button>
+                  <button class="btn btn-error btn-outline btn-xs px-1" on:click={() => deleteOrganization(o.id)} disabled={$taskRunning}>{$t('common.delete')}</button>
                 </div>
               </div>
             {/each}
@@ -710,7 +755,7 @@
 
         {#if showOrgForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.org.name')}</span>
                 <input type="text" class="input input-sm w-full" bind:value={orgName} disabled={$taskRunning} />
@@ -737,13 +782,6 @@
                 </div>
               </div>
             {/if}
-            {#if hasActs}
-              <div>
-                <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.acts.label')}</span>
-                <ActSelector options={actOptions} bind:value={orgActs} disabled={$taskRunning} />
-                <p class="text-[11px] text-base-content/35 mt-0.5">{$t('config.acts.hint')}</p>
-              </div>
-            {/if}
             <div class="flex gap-1.5">
               <button class="btn btn-success btn-xs" on:click={saveOrganization} disabled={$taskRunning}>{$t('config.org.save')}</button>
               <button class="btn btn-ghost btn-xs" on:click={closeOrgForm}>{$t('common.cancel')}</button>
@@ -759,7 +797,7 @@
   </div>
 
   <!-- Relations -->
-  <div class="card bg-base-200 shadow-sm">
+  <div class="card bg-base-200">
     <div class="card-body p-4 gap-2">
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -768,7 +806,7 @@
         <svg class="w-4 h-4 text-base-content/40 transition-transform" class:rotate-180={relCollapse} viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
       </div>
       {#if !relCollapse}
-        <div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
           {#if rels.length === 0}
             <p class="text-xs text-base-content/40 col-span-full py-2">{$t('config.rel.empty')}</p>
           {:else}
@@ -781,8 +819,8 @@
                   <span class="font-medium">{entityIcons[r.target_type] || ''} {nameById[r.target_id] || r.target_id}</span>
                 </div>
                 <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                  <button class="btn btn-ghost btn-xs px-1" on:click={() => openRelForm(r)} disabled={$taskRunning}>{$t('common.edit')}</button>
-                  <button class="btn btn-ghost btn-xs px-1 text-error" on:click={() => deleteRelation(r.id)} disabled={$taskRunning}>{$t('common.delete')}</button>
+                  <button class="btn btn-outline btn-xs px-1" on:click={() => openRelForm(r)} disabled={$taskRunning}>{$t('common.edit')}</button>
+                  <button class="btn btn-error btn-outline btn-xs px-1" on:click={() => deleteRelation(r.id)} disabled={$taskRunning}>{$t('common.delete')}</button>
                 </div>
               </div>
             {/each}
@@ -791,7 +829,7 @@
 
         {#if showRelForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-2 items-end">
+            <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-end">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.rel.source')}</span>
                 <select class="select select-sm w-full" bind:value={relSource} disabled={$taskRunning}>

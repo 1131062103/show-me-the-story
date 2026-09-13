@@ -4,27 +4,21 @@
   import { t } from '../lib/i18n/index.js';
   import { onMount, tick } from 'svelte';
   import ConfigChangePanel from '../components/ConfigChangePanel.svelte';
-  import OutlineChapterRow from '../components/OutlineChapterRow.svelte';
 
   const OUTLINE_FOCUS_KEY = 'showmethestory.outlineFocusChapter';
 
-  // Once writing begins, the chapter outline is permanently preview-only.
   function isOutlineEditable(status) {
-    return status === 'pending';
+    return status === 'pending' || status === 'writing' || status === 'review';
   }
 
   $: p = $progress;
   $: displayTitle = $config?.story?.title || p?.title || '';
-  $: displaySynopsis = $config?.story?.story_synopsis || p?.story_synopsis || '';
   $: chapters = p?.chapters || [];
-  $: arcs = p?.arcs || [];
-  $: bookOverview = p?.book_overview || '';
-  $: bookOverviewConfirmed = !!p?.book_overview_confirmed;
-  $: hasOutline = chapters.length > 0 || arcs.length > 0;
+  $: projectChapterCount = chapters.filter(ch => !ch.inherited).length;
+  $: hasOutline = chapters.length > 0;
   $: hasAccepted = chapters.some(c => c.status === 'accepted');
   $: inOutlinePhase = p?.phase === 'outline';
-  $: editingChapter = chapters.find(ch => ch.num === editingNum);
-  $: canEditOutline = !!editingChapter && isOutlineEditable(editingChapter.status) && !$taskRunning;
+  $: pendingCount = chapters.filter(c => c.status === 'pending').length;
 
   $: statusMeta = {
     pending:  { label: $t('outline.status.pending'),  cls: 'badge-ghost' },
@@ -36,201 +30,11 @@
   let reviseFeedback = '';
   let showRevise = false;
 
-  // 章节编辑状态
+  // 内联编辑
   let editingNum = -1;
   let editTitle = '';
   let editOutline = '';
-
-  // 顶层原生弹窗编辑（不受页面滚动容器裁切）
-  let showOutlineEditor = false;
-  let outlineEditorDialog;
   let editCharactersText = '';
-
-  // 大纲树折叠展开状态（书 → 卷 → 幕 → 章）
-  let bookExpanded = true;
-  let expandedArcs = new Set();
-  let expandedActs = new Set();
-  let knownArcs = new Set();
-  let knownActs = new Set();
-
-  // 新出现的卷/幕默认展开，已折叠的不受数据更新影响
-  $: if (arcs.length) {
-    for (const arc of arcs) {
-      if (!knownArcs.has(arc.id)) {
-        knownArcs.add(arc.id);
-        expandedArcs.add(arc.id);
-      }
-      for (const act of arc.acts || []) {
-        const key = `${arc.id}:${act.id}`;
-        if (!knownActs.has(key)) {
-          knownActs.add(key);
-          expandedActs.add(key);
-        }
-      }
-    }
-  }
-
-  function toggleArc(id) {
-    const next = new Set(expandedArcs);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    expandedArcs = next;
-  }
-
-  function toggleAct(key) {
-    const next = new Set(expandedActs);
-    if (next.has(key)) next.delete(key); else next.add(key);
-    expandedActs = next;
-  }
-
-  function expandAll() {
-    bookExpanded = true;
-    expandedArcs = new Set(arcs.map(a => a.id));
-    expandedActs = new Set();
-    for (const arc of arcs) for (const act of arc.acts || []) expandedActs.add(`${arc.id}:${act.id}`);
-  }
-
-  function collapseAll() {
-    bookExpanded = false;
-    expandedArcs = new Set();
-    expandedActs = new Set();
-  }
-
-  function chaptersForArc(arc) {
-    return chapters.filter(c => c.num >= arc.start_ch && c.num <= arc.end_ch);
-  }
-
-  function chaptersForAct(arc, act) {
-    return chapters.filter(c => c.num >= act.start_ch && c.num <= act.end_ch);
-  }
-
-  // 卷 / 幕 / 概览 详情弹窗（点击树节点标题查看全文）
-  let detailDialog;
-  let detailNode = null;
-
-  $: if (detailDialog) {
-    if (detailNode && !detailDialog.open) detailDialog.showModal();
-    if (!detailNode && detailDialog.open) detailDialog.close();
-  }
-
-  function arcHasWriting(arc) {
-    return chaptersForArc(arc).some(c => c.status !== 'pending');
-  }
-
-  function actHasChapters(arc, act) {
-    return chaptersForAct(arc, act).length > 0;
-  }
-
-  function buildArcSections(arc) {
-    const s = [];
-    if (arc.goal) s.push({ label: $t('outline.arcs.goalLabel'), text: arc.goal });
-    if (arc.outline) s.push({ label: bookOverview ? $t('outline.arcs.planLabel') : $t('outline.arcs.chapterOutlineLabel'), text: arc.outline });
-    if (arc.summary) s.push({ label: $t('outline.arcs.summaryLabel'), text: arc.summary });
-    return s;
-  }
-
-  function buildActSections(arc, act) {
-    const s = [];
-    if (act.goal) s.push({ label: $t('outline.acts.goalLabel'), text: act.goal });
-    if (act.outline) s.push({ label: $t('outline.acts.outlineLabel'), text: act.outline });
-    if (act.summary) s.push({ label: $t('outline.acts.summaryLabel'), text: act.summary });
-    return s;
-  }
-
-  function openBookDetail() {
-    const confirmed = bookOverviewConfirmed;
-    detailNode = {
-      kind: 'book',
-      title: `${displayTitle || $t('common.untitled')}`,
-      badge: confirmed ? $t('outline.bookOverview.confirmed') : '',
-      editable: !confirmed,
-      sections: confirmed ? [{ label: $t('outline.bookOverview.title'), text: bookOverview }] : [],
-      fTitle: '', fGoal: '', fCount: 0, fCountDisabled: true,
-      fCountLabel: '',
-      fOutline: bookOverview,
-      fOutlineLabel: $t('outline.bookOverview.title'),
-      save: saveBookEdit,
-      confirm: confirmed ? null : { label: $t('outline.bookOverview.confirm'), fn: confirmBookOverview },
-    };
-  }
-
-  function openArcDetail(arc, i) {
-    const confirmed = !!arc.confirmed;
-    detailNode = {
-      kind: 'arc',
-      title: arc.title,
-      badge: confirmed ? $t('outline.arcs.planDone') : '',
-      editable: !confirmed,
-      sections: confirmed ? buildArcSections(arc) : (arc.summary ? [{ label: $t('outline.arcs.summaryLabel'), text: arc.summary }] : []),
-      fTitle: arc.title || '',
-      fGoal: arc.goal || '',
-      fCount: arc.end_ch - arc.start_ch + 1,
-      fCountDisabled: arcHasWriting(arc) || (bookOverview && arc.acts?.length > 0),
-      fCountLabel: $t('outline.arcs.editCount'),
-      fOutline: arc.outline || '',
-      fOutlineLabel: bookOverview ? $t('outline.arcs.planLabel') : $t('outline.arcs.chapterOutlineLabel'),
-      save: () => saveArcEdit(arc),
-      confirm: bookOverview && !confirmed && arc.acts?.length ? { label: $t('outline.arcs.planConfirm'), fn: () => confirmArcOutline(arc) } : null,
-    };
-  }
-
-  function openActDetail(arc, act, j) {
-    const confirmed = !!act.confirmed;
-    detailNode = {
-      kind: 'act',
-      title: act.title,
-      badge: act.chapters_confirmed ? $t('outline.acts.chaptersDone') : act.confirmed ? $t('outline.acts.outlineDone') : '',
-      editable: !confirmed,
-      sections: confirmed ? buildActSections(arc, act) : (act.summary ? [{ label: $t('outline.acts.summaryLabel'), text: act.summary }] : []),
-      fTitle: act.title || '',
-      fGoal: act.goal || '',
-      fCount: act.end_ch - act.start_ch + 1,
-      fCountDisabled: confirmed || act.chapters_confirmed || actHasChapters(arc, act),
-      fCountLabel: $t('outline.acts.editCount'),
-      fOutline: act.outline || '',
-      fOutlineLabel: $t('outline.acts.outlineLabel'),
-      save: () => saveActEdit(arc, act),
-      confirm: !confirmed ? { label: $t('outline.acts.confirm'), fn: () => confirmActOutline(arc, act) } : null,
-    };
-  }
-
-  async function saveBookEdit() {
-    try {
-      await api('PUT', '/api/book-overview', { outline: detailNode.fOutline });
-      progress.set(await api('GET', '/api/progress'));
-      addToast($t('outline.toasts.bookOverviewEdited'), 'success');
-      detailNode = null;
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  async function saveArcEdit(arc) {
-    try {
-      await api('PUT', `/api/arcs/${arc.id}`, {
-        title: detailNode.fTitle,
-        goal: detailNode.fGoal,
-        outline: detailNode.fOutline,
-        chapter_count: Number(detailNode.fCount) || 0,
-      });
-      progress.set(await api('GET', '/api/progress'));
-      addToast($t('outline.toasts.arcEdited'), 'success');
-      detailNode = null;
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  async function saveActEdit(arc, act) {
-    try {
-      await api('PUT', `/api/arcs/${arc.id}/acts/${act.id}`, {
-        title: detailNode.fTitle,
-        goal: detailNode.fGoal,
-        outline: detailNode.fOutline,
-        chapter_count: Number(detailNode.fCount) || 0,
-      });
-      progress.set(await api('GET', '/api/progress'));
-      addToast($t('outline.toasts.actEdited'), 'success');
-      detailNode = null;
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  function closeDetail() { detailNode = null; }
 
   // Cast edit lines: "Name", "Name*", "Name|note", "Name*|note" (* = first appearance)
   function formatCharactersEdit(chars) {
@@ -271,12 +75,43 @@
     return out;
   }
 
-  // 导入续写（v3 流水线）
+  // 导入续写
   let showImport = false;
   let importContent = '';
   let importPreview = null; // [{num,title,word_count,preview}]
   let importStatus = null;  // {active,total,cursor} 断点状态
   let continuationCount = 5;
+  let planningRequirements = "";
+  let longTermDirection = "";
+  let endingIntent = 'serial';
+  let endingStyle = 'closed';
+  let endingRequirements = '';
+  let directionLoaded = false;
+  $: if (p && !directionLoaded) { longTermDirection = p.long_term_direction || ''; directionLoaded = true; }
+  let replacingBatch = null;
+  let submittedBatch = null;
+  $: batches = p?.outline_batches || [];
+  $: groups = [
+    { id: 0, chapters: chapters.filter(ch => !batches.some(b => ch.num >= b.start_ch && ch.num <= b.end_ch)) },
+    ...batches.map(b => ({ ...b, chapters: chapters.filter(ch => ch.num >= b.start_ch && ch.num <= b.end_ch) }))
+  ].filter(g => g.chapters.length);
+  $: batchActionKey = replacingBatch ? 'outline.batch.replan' : hasOutline ? 'outline.batch.generate' : 'outline.batch.first';
+  $: batchStart = replacingBatch ? replacingBatch.start_ch : Math.max(0, ...chapters.map(ch => ch.num)) + 1;
+  $: validCount = Number.isInteger(Number(continuationCount)) && continuationCount >= 1 && continuationCount <= 36;
+  $: batchBlocked = $taskRunning || p?.book_status === 'completed' || chapters.some(ch => ch.status === 'writing' || ch.status === 'review');
+  $: if (submittedBatch && batches.some(b => b.start_ch === submittedBatch.start && b.end_ch === submittedBatch.end && b.synopsis === submittedBatch.synopsis && b.revision === submittedBatch.revision)) {
+    planningRequirements = ''; replacingBatch = null; submittedBatch = null;
+    endingIntent = 'serial'; endingStyle = 'closed'; endingRequirements = '';
+  }
+  function canReplan(b) {
+    return b.id && batches[batches.length - 1]?.id === b.id && b.end_ch === Math.max(0, ...chapters.map(ch => ch.num)) && b.chapters.every(ch => ch.status === 'pending');
+  }
+  function replan(b) {
+    endingIntent = b.ending_intent || 'serial'; endingStyle = b.ending_style || 'closed'; endingRequirements = b.ending_requirements || '';
+    replacingBatch = b; planningRequirements = b.synopsis; continuationCount = b.end_ch - b.start_ch + 1;
+    document.getElementById('batch-planning')?.scrollIntoView({ behavior: 'smooth' });
+  }
+
 
   onMount(refreshImportStatus);
   $: if (!$taskRunning) refreshImportStatus();
@@ -287,12 +122,6 @@
     focusChapterFromSession();
   }
 
-  // Native dialog enters the browser's top layer, avoiding clipping by the page scroll container.
-  $: if (outlineEditorDialog) {
-    if (showOutlineEditor && !outlineEditorDialog.open) outlineEditorDialog.showModal();
-    if (!showOutlineEditor && outlineEditorDialog.open) outlineEditorDialog.close();
-  }
-
   async function focusChapterFromSession() {
     let raw;
     try { raw = sessionStorage.getItem(OUTLINE_FOCUS_KEY); } catch { return; }
@@ -301,20 +130,7 @@
     const num = parseInt(raw, 10);
     if (!num) return;
     const ch = chapters.find(c => c.num === num);
-    if (!ch) return;
-    // 展开目标章所在的卷/幕，保证行可见
-    const ea = new Set(expandedArcs);
-    const eA = new Set(expandedActs);
-    for (const arc of arcs) {
-      if (num >= arc.start_ch && num <= arc.end_ch) {
-        ea.add(arc.id);
-        for (const act of arc.acts || []) {
-          if (num >= act.start_ch && num <= act.end_ch) eA.add(`${arc.id}:${act.id}`);
-        }
-      }
-    }
-    expandedArcs = ea;
-    expandedActs = eA;
+    if (!ch || !isOutlineEditable(ch.status) || $taskRunning) return;
     startEdit(ch);
     await tick();
     const el = document.querySelector(`[data-outline-chapter="${num}"]`);
@@ -326,138 +142,6 @@
       const st = await api('GET', '/api/import/status');
       importStatus = st?.active ? st : null;
     } catch { importStatus = null; }
-  }
-
-  async function generateOutline() {
-    try {
-      await api('POST', '/api/outline/generate');
-      addToast($t('outline.toasts.outlineStarted'), 'info');
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  // 卷（arc）操作
-  let arcReqOpenId = -1;
-  let arcRequirements = '';
-  let showAppendArc = false;
-  let appendArcTitle = '';
-  let appendArcGoal = '';
-  let appendArcCount = 20;
-
-  function arcChapterCounts(arc) {
-    const inRange = chapters.filter(c => c.num >= arc.start_ch && c.num <= arc.end_ch);
-    return { outlined: inRange.length, total: arc.end_ch - arc.start_ch + 1 };
-  }
-
-  async function generateSkeleton() {
-    try {
-      await api('POST', '/api/arcs/skeleton');
-      addToast($t('outline.toasts.skeletonStarted'), 'info');
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  async function generateArcOutline(arc) {
-    try {
-      await api('POST', `/api/arcs/${arc.id}/outline`, { requirements: arcReqOpenId === arc.id ? arcRequirements.trim() : '' });
-      addToast($t('outline.toasts.arcOutlineStarted'), 'info');
-      arcReqOpenId = -1;
-      arcRequirements = '';
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  // 整书概览（书 → 卷 → 幕 → 章 四级大纲流程）
-  async function generateBookOverview() {
-    try {
-      await api('POST', '/api/book-overview/generate');
-      addToast($t('outline.toasts.bookOverviewStarted'), 'info');
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  async function confirmBookOverview() {
-    showConfirm($t('outline.toasts.bookOverviewConfirmAsk'), async () => {
-      try {
-        await api('POST', '/api/book-overview/confirm');
-        progress.set(await api('GET', '/api/progress'));
-        addToast($t('outline.toasts.bookOverviewConfirmed'), 'success');
-        detailNode = null;
-      } catch (e) { addToast(e.message, 'error'); }
-    });
-  }
-
-  async function confirmArcOutline(arc) {
-    showConfirm($t('outline.toasts.arcPlanConfirmAsk'), async () => {
-      try {
-        await api('POST', `/api/arcs/${arc.id}/outline-confirm`);
-        progress.set(await api('GET', '/api/progress'));
-        addToast($t('outline.toasts.arcPlanConfirmed'), 'success');
-        detailNode = null;
-      } catch (e) { addToast(e.message, 'error'); }
-    });
-  }
-
-  async function generateActOutline(arc, act) {
-    try {
-      await api('POST', `/api/arcs/${arc.id}/acts/${act.id}/outline`);
-      addToast($t('outline.toasts.actOutlineStarted'), 'info');
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  async function confirmActOutline(arc, act) {
-    showConfirm($t('outline.toasts.actOutlineConfirmAsk'), async () => {
-      try {
-        await api('POST', `/api/arcs/${arc.id}/acts/${act.id}/outline-confirm`);
-        progress.set(await api('GET', '/api/progress'));
-        addToast($t('outline.toasts.actOutlineConfirmed'), 'success');
-        detailNode = null;
-      } catch (e) { addToast(e.message, 'error'); }
-    });
-  }
-
-  async function generateActChapters(arc, act) {
-    try {
-      await api('POST', `/api/arcs/${arc.id}/acts/${act.id}/chapters`);
-      addToast($t('outline.toasts.actChaptersStarted'), 'info');
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  async function confirmActChapters(arc, act) {
-    showConfirm($t('outline.toasts.actChaptersConfirmAsk'), async () => {
-      try {
-        await api('POST', `/api/arcs/${arc.id}/acts/${act.id}/chapters-confirm`);
-        progress.set(await api('GET', '/api/progress'));
-        addToast($t('outline.toasts.actChaptersConfirmed'), 'success');
-      } catch (e) { addToast(e.message, 'error'); }
-    });
-  }
-
-  function actChapterCounts(arc, act) {
-    const inRange = chapters.filter(c => c.num >= act.start_ch && c.num <= act.end_ch);
-    return { outlined: inRange.length, total: act.end_ch - act.start_ch + 1 };
-  }
-
-  function actComplete(arc, act) {
-    const inRange = chapters.filter(c => c.num >= act.start_ch && c.num <= act.end_ch);
-    return inRange.length > 0 && inRange.every(c => c.status === 'accepted');
-  }
-
-  async function generateActSummary(arc, act) {
-    try {
-      await api('POST', `/api/arcs/${arc.id}/acts/${act.id}/summary`);
-      addToast($t('outline.toasts.actSummaryStarted'), 'info');
-    } catch (e) { addToast(e.message, 'error'); }
-  }
-
-  async function appendArc() {
-    try {
-      await api('POST', '/api/arcs/append', {
-        title: appendArcTitle.trim(),
-        goal: appendArcGoal.trim(),
-        chapter_count: Number(appendArcCount) || 20,
-      });
-      addToast($t('outline.toasts.arcAppendStarted'), 'info');
-      showAppendArc = false;
-      appendArcTitle = '';
-      appendArcGoal = '';
-    } catch (e) { addToast(e.message, 'error'); }
   }
 
   async function confirmOutline() {
@@ -493,10 +177,21 @@
   }
 
   async function generateContinuation() {
-    try {
-      await api('POST', '/api/outline/generate-continuation', { chapter_count: Number(continuationCount) || 5 });
-      addToast($t('outline.toasts.continuationStarted'), 'info');
-    } catch (e) { addToast(e.message, 'error'); }
+    if (!planningRequirements.trim() || !validCount || batchBlocked) return;
+    if (endingIntent !== 'serial' && endingStyle === 'custom' && !endingRequirements.trim()) return;
+    const body = { chapter_count: Number(continuationCount), outline_synopsis: planningRequirements.trim(), long_term_direction: longTermDirection.trim(), mode: replacingBatch ? 'replace_last' : 'append', batch_id: replacingBatch?.id || 0 };
+    Object.assign(body, { ending_intent: endingIntent, ending_style: endingIntent === 'serial' ? '' : endingStyle, ending_requirements: endingRequirements.trim() });
+    const submitted = { revision: replacingBatch ? (replacingBatch.revision || 0) + 1 : 1, start: batchStart, end: batchStart + body.chapter_count - 1, synopsis: body.outline_synopsis };
+    const run = async () => {
+      try {
+        await api('POST', '/api/outline/generate-continuation', body);
+        submittedBatch = submitted;
+        addToast($t('outline.toasts.continuationStarted'), 'info');
+      } catch (e) { addToast(e.message, 'error'); }
+    };
+    if (replacingBatch) showConfirm($t('outline.batch.replaceConfirm'), run);
+    else if (batches.some(b => b.planned_final)) showConfirm($t('ending.continueConfirm'), () => { body.confirm_continue = true; return run(); });
+    else await run();
   }
 
   function startEdit(ch) {
@@ -504,16 +199,13 @@
     editTitle = ch.title;
     editOutline = ch.outline;
     editCharactersText = formatCharactersEdit(ch.characters);
-    showOutlineEditor = true;
   }
 
   function cancelEdit() {
     editingNum = -1;
-    showOutlineEditor = false;
   }
 
   async function saveEdit() {
-    if (!canEditOutline) { addToast($t('outline.toasts.editLocked'), 'error'); return; }
     if (!editTitle.trim() || !editOutline.trim()) { addToast($t('outline.toasts.editRequired'), 'error'); return; }
     try {
       await api('PUT', '/api/outline/' + editingNum, {
@@ -524,7 +216,6 @@
       progress.set(await api('GET', '/api/progress'));
       addToast($t('outline.toasts.editSaved', { num: editingNum }), 'success');
       editingNum = -1;
-      showOutlineEditor = false;
     } catch (e) { addToast(e.message, 'error'); }
   }
 
@@ -573,26 +264,65 @@
     outlineCharacterSuggestions.set([]);
     outlineCharacterShowSuggestions.set(false);
   }
+  async function reviewStory() {
+    try {
+      await api("POST", "/api/story/review");
+      addToast($t("outline.dynamic.reviewStarted"), "info");
+    } catch (e) { addToast(e.message, "error"); }
+  }
 </script>
 
 <div class="space-y-3">
+  <div id="batch-planning" class="card bg-base-200">
+    <div class="card-body p-4 gap-3">
+      <h3 class="card-title text-base">{$t(batchActionKey)}</h3>
+      <label class="block text-sm" for="batch-count">{$t('outline.batch.count')}</label>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <input id="batch-count" type="number" min="1" max="36" step="1" class="input input-sm w-24" bind:value={continuationCount} disabled={batchBlocked} aria-describedby="batch-range" />
+        <p id="batch-range" class="text-sm text-base-content/70" aria-live="polite">
+          {#if validCount}
+            {$t(replacingBatch
+              ? (Number(continuationCount) === 1 ? 'outline.batch.regenerateSingle' : 'outline.batch.regenerateRange')
+              : (Number(continuationCount) === 1 ? 'outline.batch.generateSingle' : 'outline.batch.generateRange'),
+              { start: batchStart, end: batchStart + Number(continuationCount) - 1 })}
+          {/if}
+        </p>
+      </div>
+      <label class="block text-sm" for="batch-synopsis">{$t('outline.batch.synopsis')}</label>
+      <textarea id="batch-synopsis" class="textarea w-full h-36" bind:value={planningRequirements} placeholder={$t('outline.batch.placeholder')} disabled={batchBlocked}></textarea>
+      <label class="block text-sm" for="batch-direction">{$t('ending.direction')}</label>
+      <p class="text-xs text-base-content/70">{$t('ending.directionHelp')}</p>
+      <textarea id="batch-direction" class="textarea textarea-sm w-full h-20" bind:value={longTermDirection} placeholder={$t('ending.directionExample')} disabled={batchBlocked}></textarea>
+      <label class="block text-sm" for="ending-intent">{$t('ending.intent')}</label>
+      <select id="ending-intent" class="select select-sm w-full" bind:value={endingIntent} disabled={batchBlocked}>
+        <option value="serial">{$t('ending.serial')}</option><option value="final">{$t('ending.final')}</option><option value="sequel">{$t('ending.sequel')}</option>
+      </select>
+      {#if endingIntent !== 'serial'}
+        <label class="block text-sm" for="ending-style">{$t('ending.style')}</label>
+        <select id="ending-style" class="select select-sm w-full" bind:value={endingStyle} disabled={batchBlocked}>
+          <option value="closed">{$t('ending.closed')}</option><option value="open">{$t('ending.open')}</option><option value="custom">{$t('ending.custom')}</option>
+        </select>
+        <p class="text-xs text-base-content/70">{$t('ending.help')}</p>
+        <label class="block text-sm" for="ending-requirements">{$t('ending.requirements')}</label>
+        <textarea id="ending-requirements" class="textarea textarea-sm w-full" bind:value={endingRequirements} required={endingStyle === 'custom'} disabled={batchBlocked}></textarea>
+      {/if}
+      <div class="flex justify-end gap-2">
+        {#if replacingBatch}<button class="btn btn-ghost btn-sm" disabled={$taskRunning} on:click={() => { replacingBatch = null; planningRequirements = ''; }}>{$t('common.cancel')}</button>{/if}
+        <button class="btn btn-primary btn-sm" on:click={generateContinuation} disabled={batchBlocked || !validCount || !planningRequirements.trim() || (endingIntent !== 'serial' && endingStyle === 'custom' && !endingRequirements.trim())}>{$t(batchActionKey)}</button>
+      </div>
+    </div>
+  </div>
   {#if !hasOutline}
     <!-- 空状态 -->
     <div class="text-center py-14 text-base-content/50">
       <div class="text-5xl mb-3">📝</div>
       <p class="text-base mb-1">{$t('outline.empty.title')}</p>
       <p class="text-sm text-base-content/35 mb-6">{$t('outline.empty.hint')}</p>
-      <div class="flex justify-center gap-2">
-        <button class="btn btn-primary btn-sm" on:click={generateBookOverview} disabled={$taskRunning}>{$t('outline.btn.bookOverview')}</button>
-        <button class="btn btn-ghost btn-sm" on:click={generateOutline} disabled={$taskRunning}>{$t('outline.btn.generate')}</button>
-        <button class="btn btn-secondary btn-sm" on:click={generateSkeleton} disabled={$taskRunning}>{$t('outline.btn.skeleton')}</button>
-        <button class="btn btn-ghost btn-sm" on:click={() => showImport = !showImport} disabled={$taskRunning}>{$t('outline.btn.import')}</button>
-      </div>
-      <p class="text-xs text-base-content/35 mt-2">{$t('outline.empty.overviewHint')}</p>
+      <button class="btn btn-outline btn-sm" on:click={() => showImport = !showImport} disabled={$taskRunning}>{$t('outline.btn.import')}</button>
     </div>
 
     {#if showImport}
-      <div class="card bg-base-200 shadow-sm">
+      <div class="card bg-base-200">
         <div class="card-body p-4 gap-2">
           <h3 class="card-title text-base">{$t('outline.import.title')}</h3>
           <p class="text-xs text-base-content/50">{$t('outline.import.hint')}</p>
@@ -634,7 +364,7 @@
     <ConfigChangePanel />
 
     {#if $outlineCharacterShowSuggestions && $outlineCharacterSuggestions.length > 0}
-      <div class="card bg-base-200 border border-primary/30 shadow-sm">
+      <div class="card bg-base-200 border border-primary/30 ">
         <div class="card-body py-4 gap-3">
           <h3 class="font-semibold">{$t('outline.charSuggestions.title', { n: $outlineCharacterSuggestions.length })}</h3>
           <p class="text-sm text-base-content/60">{$t('outline.charSuggestions.hint')}</p>
@@ -663,24 +393,17 @@
     {/if}
 
     <!-- 操作栏 -->
-    <div class="card bg-base-200 shadow-sm">
+    <div class="card bg-base-200">
       <div class="card-body p-4 gap-2">
         <div class="flex items-center gap-2 flex-wrap">
           <h3 class="text-base font-semibold flex-1 min-w-0 truncate">📖 {displayTitle || $t('common.untitled')}</h3>
-          {#if inOutlinePhase && !bookOverview}
+          {#if inOutlinePhase}
             <button class="btn btn-success btn-xs" on:click={confirmOutline} disabled={$taskRunning || chapters.length === 0}>{$t('outline.btn.confirm')}</button>
           {/if}
-          <button class="btn btn-ghost btn-xs" on:click={() => showRevise = !showRevise} disabled={$taskRunning}>{$t('outline.btn.revise')}</button>
-          {#if hasAccepted}
-            <div class="join">
-              <input type="number" min="1" max="50" class="input input-xs join-item w-14" bind:value={continuationCount} disabled={$taskRunning} />
-              <button class="btn btn-primary btn-xs join-item" on:click={generateContinuation} disabled={$taskRunning}>{$t('outline.btn.continuation')}</button>
-            </div>
-          {:else if inOutlinePhase}
-            <button class="btn btn-ghost btn-xs" on:click={generateOutline} disabled={$taskRunning}>{$t('outline.btn.regenerate')}</button>
-          {/if}
+          <button class="btn btn-secondary btn-xs" on:click={reviewStory} disabled={$taskRunning || !hasAccepted}>{$t('outline.dynamic.review')}</button>
+          <button class="btn btn-outline btn-xs" on:click={() => showRevise = !showRevise} disabled={$taskRunning}>{$t('outline.btn.revise')}</button>
           {#if !hasAccepted}
-            <button class="btn btn-ghost btn-xs text-error" on:click={deleteOutline} disabled={$taskRunning}>{$t('outline.btn.deleteOutline')}</button>
+            <button class="btn btn-error btn-outline btn-xs" on:click={deleteOutline} disabled={$taskRunning}>{$t('outline.btn.deleteOutline')}</button>
           {/if}
         </div>
 
@@ -697,206 +420,85 @@
           </div>
         {/if}
 
+		{#if p.latest_planning_review}
+			<div class="bg-secondary/10 border border-secondary/30 rounded p-3 text-sm whitespace-pre-wrap">{p.latest_planning_review.content}</div>
+		{/if}
+
         {#if p.core_prompt}
           <div>
             <span class="text-xs text-base-content/50">{$t('outline.corePrompt')}</span>
             <div class="bg-base-300 rounded p-2 text-sm mt-0.5 max-h-24 overflow-y-auto">{p.core_prompt}</div>
           </div>
         {/if}
-        {#if displaySynopsis}
-          <div>
-            <span class="text-xs text-base-content/50">{$t('outline.synopsis')}</span>
-            <div class="bg-base-300 rounded p-2 text-sm mt-0.5 max-h-24 overflow-y-auto">{displaySynopsis}</div>
-          </div>
-        {/if}
+
       </div>
     </div>
 
-    <!-- 大纲树状结构（书 → 卷 → 幕 → 章，点击节点查看详情，卷/幕可折叠） -->
-    <div class="card bg-base-200 shadow-sm">
+    <!-- 章节大纲列表 -->
+    <div class="card bg-base-200">
       <div class="card-body p-4 gap-2">
-        <div class="flex items-center justify-between flex-wrap gap-2">
-          <h4 class="text-sm font-semibold text-base-content/60">
-            {#if bookOverview}{$t('outline.tree.title')}{:else}{$t('outline.arcs.title')}{/if}
-            <span class="font-normal text-base-content/35">({chapters.length})</span>
-          </h4>
-          <div class="flex items-center gap-1.5">
-            <button class="btn btn-ghost btn-xs" on:click={expandAll} disabled={$taskRunning}>{$t('outline.tree.expandAll')}</button>
-            <button class="btn btn-ghost btn-xs" on:click={collapseAll} disabled={$taskRunning}>{$t('outline.tree.collapseAll')}</button>
-            {#if arcs.length > 0}
-              <button class="btn btn-ghost btn-xs" on:click={() => showAppendArc = !showAppendArc} disabled={$taskRunning}>{$t('outline.arcs.append')}</button>
-            {/if}
-          </div>
+        <div class="flex items-center justify-between">
+          <h4 class="text-sm font-semibold text-base-content/60">{$t('outline.chapterList')} <span class="font-normal text-base-content/35">{$t('outline.chapterList.summary', { total: projectChapterCount, suffix: pendingCount ? $t('outline.chapterList.pendingSuffix', { n: pendingCount }) : '' })}</span></h4>
+          <span class="text-xs text-base-content/35">{$t('outline.chapterList.editHint')}</span>
         </div>
-
-        {#if showAppendArc}
-          <div class="bg-base-300 rounded-lg p-3 space-y-2">
-            <div class="flex gap-2">
-              <input type="text" class="input input-sm flex-1" bind:value={appendArcTitle} placeholder={$t('outline.arcs.appendTitle')} disabled={$taskRunning} />
-              <input type="number" min="1" max="100" class="input input-sm w-20" bind:value={appendArcCount} disabled={$taskRunning} title={$t('outline.arcs.appendCount')} />
-            </div>
-            <textarea class="textarea textarea-sm w-full h-16 text-sm" bind:value={appendArcGoal} placeholder={$t('outline.arcs.appendGoal')} disabled={$taskRunning}></textarea>
-            <div class="flex justify-end gap-2">
-              <button class="btn btn-ghost btn-xs" on:click={() => showAppendArc = false}>{$t('common.cancel')}</button>
-              <button class="btn btn-primary btn-xs" on:click={appendArc} disabled={$taskRunning}>{$t('outline.arcs.appendSubmit')}</button>
-            </div>
-          </div>
-        {/if}
-
-        <div class="space-y-0.5">
-          {#if bookOverview}
-            <!-- 书级：整书概览 -->
-            <div class="flex items-center gap-1.5 rounded-lg bg-base-300 px-2 py-1.5">
-              <button class="btn btn-ghost btn-xs btn-square shrink-0 w-5 h-5 p-0" on:click={() => bookExpanded = !bookExpanded} aria-label={$t('outline.tree.toggle')}>
-                {bookExpanded ? '▾' : '▸'}
-              </button>
-              <button class="flex-1 min-w-0 text-left" on:click={openBookDetail}>
-                <span class="text-sm font-semibold truncate">📖 {displayTitle || $t('common.untitled')}</span>
-                {#if bookOverviewConfirmed}
-                  <span class="badge badge-xs badge-success ml-1 align-middle">{$t('outline.bookOverview.confirmed')}</span>
-                {/if}
-              </button>
-              {#if !bookOverviewConfirmed}
-                <button class="btn btn-success btn-xs shrink-0" on:click={confirmBookOverview} disabled={$taskRunning}>{$t('outline.bookOverview.confirm')}</button>
-              {/if}
-            </div>
-            {#if !bookOverviewConfirmed}
-              <p class="text-xs text-base-content/45 px-2 ml-8">{$t('outline.bookOverview.unlockedHint')}</p>
-            {/if}
-
-            {#if bookExpanded}
-              <div class="ml-4 pl-2 border-l border-base-300 space-y-0.5">
-                {#each arcs as arc, i (arc.id)}
-                  <div class="flex items-center gap-1.5 rounded-lg bg-base-300/70 px-2 py-1.5">
-                    <button class="btn btn-ghost btn-xs btn-square shrink-0 w-5 h-5 p-0" on:click={() => toggleArc(arc.id)} aria-label={$t('outline.tree.toggle')}>
-                      {expandedArcs.has(arc.id) ? '▾' : '▸'}
-                    </button>
-                    <button class="flex-1 min-w-0 text-left flex items-center gap-2" on:click={() => openArcDetail(arc, i)}>
-                      <span class="text-sm font-medium truncate">{arc.title}</span>
-                      <span class="text-xs text-base-content/40 shrink-0">{$t('outline.arcs.range', { start: arc.start_ch, end: arc.end_ch })}</span>
-                    </button>
-                    {#if arc.confirmed}
-                      <span class="badge badge-xs badge-success shrink-0">{$t('outline.arcs.planDone')}</span>
-                    {/if}
-                    <div class="shrink-0 flex items-center gap-1">
-                      <button class="btn btn-primary btn-xs" on:click={() => generateArcOutline(arc)} disabled={$taskRunning || !bookOverviewConfirmed}>
-                        {arc.acts?.length ? $t('outline.arcs.regenPlan') : $t('outline.arcs.genPlan')}
-                      </button>
-                      <button class="btn btn-success btn-xs" on:click={() => confirmArcOutline(arc)} disabled={$taskRunning || arc.confirmed || !arc.acts?.length}>
-                        {$t('outline.arcs.planConfirm')}
-                      </button>
-                    </div>
-                  </div>
-
-                  {#if expandedArcs.has(arc.id)}
-                    <div class="ml-4 pl-2 border-l border-base-300 space-y-0.5">
-                      {#if arc.acts?.length}
-                        {#each arc.acts as act, j (act.id)}
-                          {@const actCounts = actChapterCounts(arc, act)}
-                          <div class="flex items-center gap-1.5 rounded-lg bg-base-200/70 px-2 py-1.5">
-                            <button class="btn btn-ghost btn-xs btn-square shrink-0 w-5 h-5 p-0" on:click={() => toggleAct(`${arc.id}:${act.id}`)} aria-label={$t('outline.tree.toggle')}>
-                              {expandedActs.has(`${arc.id}:${act.id}`) ? '▾' : '▸'}
-                            </button>
-                            <button class="flex-1 min-w-0 text-left flex items-center gap-2" on:click={() => openActDetail(arc, act, j)}>
-                              <span class="text-sm font-medium truncate">{act.title}</span>
-                              <span class="text-xs text-base-content/40 shrink-0">{$t('outline.arcs.range', { start: act.start_ch, end: act.end_ch })}</span>
-                            </button>
-                            {#if act.confirmed}
-                              <span class="badge badge-xs badge-info shrink-0">{$t('outline.acts.outlineDone')}</span>
-                            {/if}
-                            {#if act.chapters_confirmed}
-                              <span class="badge badge-xs badge-success shrink-0">{$t('outline.acts.chaptersDone')}</span>
-                            {/if}
-                            <div class="shrink-0 flex items-center gap-1">
-                              {#if !act.confirmed}
-                                <button class="btn btn-primary btn-xs" on:click={() => generateActOutline(arc, act)} disabled={$taskRunning || !arc.confirmed}>
-                                  {act.outline ? $t('outline.acts.regenOutline') : $t('outline.acts.genOutline')}
-                                </button>
-                                <button class="btn btn-success btn-xs" on:click={() => confirmActOutline(arc, act)} disabled={$taskRunning || !act.outline}>{$t('outline.acts.confirm')}</button>
-                              {/if}
-                              {#if act.confirmed && !act.chapters_confirmed}
-                                <button class="btn btn-primary btn-xs" on:click={() => generateActChapters(arc, act)} disabled={$taskRunning}>
-                                  {actCounts.outlined > 0 ? $t('outline.acts.regenChapters') : $t('outline.acts.genChapters')}
-                                </button>
-                                <button class="btn btn-success btn-xs" on:click={() => confirmActChapters(arc, act)} disabled={$taskRunning || actCounts.outlined === 0}>
-                                  {$t('outline.acts.confirmChapters')}
-                                </button>
-                              {/if}
-                              {#if actComplete(arc, act) && !act.summary}
-                                <button class="btn btn-warning btn-xs" on:click={() => generateActSummary(arc, act)} disabled={$taskRunning}>{$t('outline.acts.genSummary')}</button>
-                              {/if}
-                            </div>
-                          </div>
-
-                          {#if expandedActs.has(`${arc.id}:${act.id}`)}
-                            <div class="ml-4 pl-2 border-l border-base-300 space-y-0.5">
-                              {#if actComplete(arc, act) && !act.summary}
-                                <p class="text-xs text-warning px-1 pb-0.5">{$t('outline.acts.summaryPending')}</p>
-                              {/if}
-                              {#if act.confirmed && !act.chapters_confirmed}
-                                <div class="flex items-center gap-2 px-1 pb-0.5">
-                                  <span class="text-xs text-base-content/45">{$t('outline.acts.progress', { n: actCounts.outlined, total: actCounts.total })}</span>
-                                  <div class="progress progress-primary h-1 flex-1 max-w-40" value={actCounts.outlined} max={actCounts.total}></div>
-                                </div>
-                              {/if}
-                              {#each chaptersForAct(arc, act) as ch (ch.num)}
-                                <OutlineChapterRow {ch} {statusMeta} editable={isOutlineEditable(ch.status) && !$taskRunning} onEdit={() => startEdit(ch)} />
-                              {/each}
-                            </div>
-                          {/if}
-                        {/each}
-                      {:else}
-                        {#each chaptersForArc(arc) as ch (ch.num)}
-                          <OutlineChapterRow {ch} {statusMeta} editable={isOutlineEditable(ch.status) && !$taskRunning} onEdit={() => startEdit(ch)} />
-                        {/each}
-                      {/if}
-                    </div>
+        <div class="space-y-1.5">
+          {#each groups as group (group.id)}
+            <section class="border border-base-content/10 rounded-lg p-3 space-y-2">
+              <div class="flex items-center justify-between gap-2">
+                <h4 class="font-semibold text-sm">{group.id ? $t('outline.batch.range', { start: group.start_ch, end: group.end_ch }) : $t('outline.batch.imported')}</h4>
+                {#if group.planned_final}<span class="badge badge-info">{$t('ending.marker', {num: group.end_ch})}</span>{/if}
+                {#if canReplan(group)}<button class="btn btn-outline btn-xs" disabled={batchBlocked} on:click={() => replan(group)}>{$t('outline.batch.replan')}</button>{/if}
+              </div>
+              {#if group.synopsis}<p class="whitespace-pre-wrap text-sm text-base-content/70 mb-3">{group.synopsis}</p>{/if}
+          {#each group.chapters as ch (ch.num)}
+            {#if editingNum === ch.num}
+              <div data-outline-chapter={ch.num} class="bg-base-300 rounded-lg p-3 space-y-2 ring-1 ring-primary/50">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-bold text-base-content/50 shrink-0">{$t('outline.chapter.chapterLabel', { num: ch.num })}</span>
+                  <input type="text" class="input input-sm flex-1" bind:value={editTitle} placeholder={$t('outline.chapter.titlePlaceholder')} disabled={$taskRunning} />
+                </div>
+                <textarea class="textarea textarea-sm w-full h-24 text-sm" bind:value={editOutline} placeholder={$t('outline.chapter.outlinePlaceholder')} disabled={$taskRunning}></textarea>
+                <div>
+                  <label for="chapter-cast" class="text-xs text-base-content/50 mb-1 block">{$t('outline.chapter.castLabel')}</label>
+                  <textarea id="chapter-cast" class="textarea textarea-sm w-full h-16 text-sm font-mono" bind:value={editCharactersText} placeholder={$t('outline.chapter.castPlaceholder')} disabled={$taskRunning}></textarea>
+                  <p class="text-xs text-base-content/35 mt-0.5">{$t('outline.chapter.castHint')}</p>
+                </div>
+                <div class="flex justify-end gap-2">
+                  <button class="btn btn-ghost btn-xs" on:click={cancelEdit}>{$t('common.cancel')}</button>
+                  <button class="btn btn-success btn-xs" on:click={saveEdit} disabled={$taskRunning}>{$t('common.save')}</button>
+                </div>
+              </div>
+            {:else}
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <div
+                data-outline-chapter={ch.num}
+                class="bg-base-300 rounded-lg p-2.5 group {isOutlineEditable(ch.status) && !$taskRunning ? 'cursor-pointer hover:ring-1 hover:ring-primary/40' : ''}"
+                on:click={() => isOutlineEditable(ch.status) && !$taskRunning && startEdit(ch)}
+              >
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-bold text-base-content/40 w-12 shrink-0">{ch.num}</span>
+                  <span class="text-sm font-medium flex-1 min-w-0 truncate">{ch.title}</span>
+                  <span class="badge badge-xs {statusMeta[ch.status]?.cls || 'badge-ghost'}">{statusMeta[ch.status]?.label || ch.status}</span>
+                  {#if isOutlineEditable(ch.status)}
+                    <span class="text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0">{$t('outline.chapter.editTag')}</span>
                   {/if}
-                {/each}
+                </div>
+                {#if ch.characters?.length}
+                  <div class="flex flex-wrap gap-1 mt-1.5 ml-14">
+                    {#each ch.characters as c}
+                      <span class="badge badge-ghost badge-xs gap-0.5" title={c.note || ''}>
+                        {c.name}{#if c.first_appearance}<span class="text-warning">*</span>{/if}
+                      </span>
+                    {/each}
+                  </div>
+                {/if}
+                <p class="text-xs text-base-content/50 mt-1 ml-14 line-clamp-2">{ch.outline}</p>
               </div>
             {/if}
-          {:else if arcs.length > 0}
-            <!-- v3：卷 → 章（无幕层） -->
-            {#each arcs as arc, i (arc.id)}
-              {@const counts = arcChapterCounts(arc)}
-              <div class="flex items-center gap-1.5 rounded-lg bg-base-300/70 px-2 py-1.5">
-                <button class="btn btn-ghost btn-xs btn-square shrink-0 w-5 h-5 p-0" on:click={() => toggleArc(arc.id)} aria-label={$t('outline.tree.toggle')}>
-                  {expandedArcs.has(arc.id) ? '▾' : '▸'}
-                </button>
-                <button class="flex-1 min-w-0 text-left flex items-center gap-2" on:click={() => openArcDetail(arc, i)}>
-                  <span class="text-sm font-medium truncate">{arc.title}</span>
-                  <span class="text-xs text-base-content/40 shrink-0">{$t('outline.arcs.range', { start: arc.start_ch, end: arc.end_ch })}</span>
-                </button>
-                <span class="badge badge-xs {counts.outlined >= counts.total ? 'badge-success' : 'badge-ghost'} shrink-0">{$t('outline.arcs.outlined', { n: counts.outlined, total: counts.total })}</span>
-                {#if arc.summary}
-                  <span class="badge badge-xs badge-info shrink-0">{$t('outline.arcs.summaryDone')}</span>
-                {/if}
-                <div class="shrink-0 flex items-center gap-1">
-                  <button class="btn btn-primary btn-xs" on:click={() => generateArcOutline(arc)} disabled={$taskRunning}>
-                    {counts.outlined > 0 ? $t('outline.arcs.regenOutline') : $t('outline.arcs.genOutline')}
-                  </button>
-                  <button class="btn btn-ghost btn-xs" on:click={() => { arcReqOpenId = arcReqOpenId === arc.id ? -1 : arc.id; arcRequirements = ''; }} disabled={$taskRunning}>+</button>
-                </div>
-              </div>
-
-              {#if arcReqOpenId === arc.id}
-                <textarea class="textarea textarea-sm w-full h-14 text-sm mt-1 ml-8" bind:value={arcRequirements} placeholder={$t('outline.arcs.reqPlaceholder')} disabled={$taskRunning}></textarea>
-              {/if}
-
-              {#if expandedArcs.has(arc.id)}
-                <div class="ml-4 pl-2 border-l border-base-300 space-y-0.5">
-                  {#each chaptersForArc(arc) as ch (ch.num)}
-                    <OutlineChapterRow {ch} {statusMeta} editable={isOutlineEditable(ch.status) && !$taskRunning} onEdit={() => startEdit(ch)} />
-                  {/each}
-                </div>
-              {/if}
-            {/each}
-          {:else}
-            <!-- v2：扁平章节列表 -->
-            {#each chapters as ch (ch.num)}
-              <OutlineChapterRow {ch} {statusMeta} editable={isOutlineEditable(ch.status) && !$taskRunning} onEdit={() => startEdit(ch)} />
-            {/each}
-          {/if}
+          {/each}
+            </section>
+          {/each}
         </div>
 
         {#if $streamingChapterIdx >= 0 && $streamingContent}
@@ -909,129 +511,5 @@
         {/if}
       </div>
     </div>
-
-    <dialog
-      bind:this={outlineEditorDialog}
-      class="outline-editor-dialog m-auto w-[calc(100vw-1.5rem)] max-w-3xl rounded-xl border border-base-content/20 bg-base-100 p-0 text-base-content shadow-2xl backdrop:bg-black/60 sm:w-[calc(100vw-2rem)]"
-      on:cancel|preventDefault={cancelEdit}
-      on:close={() => { showOutlineEditor = false; editingNum = -1; }}
-      aria-label={$t('outline.chapter.chapterLabel', { num: editingNum })}
-    >
-      <div class="flex h-[min(82dvh,42rem)] max-h-[calc(100dvh-1.5rem)] flex-col">
-        <div class="flex items-center gap-3 border-b border-base-300 px-4 py-3 sm:px-5 sm:py-4 shrink-0">
-          <span class="text-sm font-bold text-base-content/50 shrink-0">{$t('outline.chapter.chapterLabel', { num: editingNum })}</span>
-          {#if canEditOutline}
-            <input type="text" class="input input-sm flex-1 min-w-0" bind:value={editTitle} placeholder={$t('outline.chapter.titlePlaceholder')} />
-          {:else}
-            <span class="font-medium flex-1 min-w-0 truncate">{editingChapter?.title}</span>
-            <span class="badge badge-xs {statusMeta[editingChapter?.status]?.cls || 'badge-ghost'}">{statusMeta[editingChapter?.status]?.label || editingChapter?.status}</span>
-          {/if}
-          <button class="btn btn-ghost btn-xs btn-circle shrink-0" on:click={cancelEdit} aria-label={$t('common.close')}>✕</button>
-        </div>
-        <div class="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
-          {#if canEditOutline}
-            <textarea class="textarea textarea-sm h-full min-h-56 w-full resize-none text-sm leading-6" bind:value={editOutline} placeholder={$t('outline.chapter.outlinePlaceholder')}></textarea>
-            <div class="mt-3">
-              <span class="text-xs text-base-content/50 mb-1 block">{$t('outline.chapter.castLabel')}</span>
-              <textarea class="textarea textarea-sm w-full h-20 text-sm font-mono" bind:value={editCharactersText} placeholder={$t('outline.chapter.castPlaceholder')} disabled={$taskRunning}></textarea>
-              <p class="text-[11px] text-base-content/35 mt-0.5">{$t('outline.chapter.castHint')}</p>
-            </div>
-          {:else}
-            <div class="h-full min-h-56 whitespace-pre-wrap rounded-lg bg-base-200 p-3 text-sm leading-6">{editingChapter?.outline}</div>
-            <p class="mt-2 text-xs text-base-content/50">{$t('outline.chapter.readonlyHint')}</p>
-          {/if}
-        </div>
-        <div class="flex justify-end gap-2 border-t border-base-300 px-4 py-3 sm:px-5 sm:py-4 shrink-0">
-          <button class="btn btn-ghost btn-sm" on:click={cancelEdit}>{canEditOutline ? $t('common.cancel') : $t('common.close')}</button>
-          {#if canEditOutline}
-            <button class="btn btn-success btn-sm" on:click={saveEdit}>{$t('common.save')}</button>
-          {/if}
-        </div>
-      </div>
-    </dialog>
-
-    <!-- 卷 / 幕 / 整书概览 详情弹窗（确认前可编辑） -->
-    <dialog
-      bind:this={detailDialog}
-      class="m-auto w-[calc(100vw-1.5rem)] max-w-3xl rounded-xl border border-base-content/20 bg-base-100 p-0 text-base-content shadow-2xl backdrop:bg-black/60 sm:w-[calc(100vw-2rem)]"
-      on:cancel|preventDefault={closeDetail}
-      on:close={() => { detailNode = null; }}
-      aria-label={detailNode?.title || ''}
-    >
-      <div class="flex h-[min(82dvh,42rem)] max-h-[calc(100dvh-1.5rem)] flex-col">
-        <div class="flex items-center gap-3 border-b border-base-300 px-4 py-3 sm:px-5 sm:py-4 shrink-0">
-          <span class="text-sm font-semibold flex-1 min-w-0 truncate">{detailNode?.title}</span>
-          {#if detailNode?.editable}
-            <span class="badge badge-xs badge-warning shrink-0">{$t('outline.detail.editing')}</span>
-          {/if}
-          {#if detailNode?.badge}
-            <span class="badge badge-xs badge-success shrink-0">{detailNode.badge}</span>
-          {/if}
-          <button class="btn btn-ghost btn-xs btn-circle shrink-0" on:click={closeDetail} aria-label={$t('common.close')}>✕</button>
-        </div>
-        <div class="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5 space-y-4">
-          {#if detailNode?.editable}
-            <div class="space-y-3">
-              {#if detailNode.kind !== 'book'}
-                <div class="flex gap-2">
-                  <div class="flex-1 min-w-0">
-                    <div class="text-xs text-base-content/50 mb-1">{$t('outline.detail.titleLabel')}</div>
-                    <input type="text" class="input input-sm w-full" bind:value={detailNode.fTitle} />
-                  </div>
-                  {#if !detailNode.fCountDisabled}
-                    <div class="w-32 shrink-0">
-                      <div class="text-xs text-base-content/50 mb-1">{detailNode.fCountLabel}</div>
-                      <input type="number" min="1" max="500" class="input input-sm w-full" bind:value={detailNode.fCount} />
-                    </div>
-                  {/if}
-                </div>
-                <div>
-                  <div class="text-xs text-base-content/50 mb-1">{$t('outline.detail.goalLabel')}</div>
-                  <textarea class="textarea textarea-sm w-full h-20 text-sm" bind:value={detailNode.fGoal}></textarea>
-                </div>
-              {/if}
-              <div>
-                <div class="text-xs text-base-content/50 mb-1">{detailNode.fOutlineLabel}</div>
-                <textarea class="textarea textarea-sm w-full min-h-56 text-sm leading-6" bind:value={detailNode.fOutline}></textarea>
-              </div>
-              {#if detailNode.sections?.length}
-                <div class="space-y-4 border-t border-base-300 pt-2">
-                  {#each detailNode.sections as s}
-                    <div>
-                      {#if s.label}
-                        <div class="text-xs text-base-content/50 mb-1">{s.label}</div>
-                      {/if}
-                      <div class="whitespace-pre-wrap rounded-lg bg-base-200 p-3 text-sm leading-6">{s.text}</div>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {:else}
-            {#if detailNode?.sections?.length}
-              {#each detailNode.sections as s}
-                <div>
-                  {#if s.label}
-                    <div class="text-xs text-base-content/50 mb-1">{s.label}</div>
-                  {/if}
-                  <div class="whitespace-pre-wrap rounded-lg bg-base-200 p-3 text-sm leading-6">{s.text}</div>
-                </div>
-              {/each}
-            {:else}
-              <p class="text-sm text-base-content/45">{$t('outline.detail.empty')}</p>
-            {/if}
-          {/if}
-        </div>
-        <div class="flex justify-end gap-2 border-t border-base-300 px-4 py-3 sm:px-5 sm:py-4 shrink-0">
-          <button class="btn btn-ghost btn-sm" on:click={closeDetail}>{detailNode?.editable ? $t('common.cancel') : $t('common.close')}</button>
-          {#if detailNode?.confirm}
-            <button class="btn btn-success btn-sm" on:click={detailNode.confirm.fn} disabled={$taskRunning}>{detailNode.confirm.label}</button>
-          {/if}
-          {#if detailNode?.editable}
-            <button class="btn btn-primary btn-sm" on:click={detailNode.save} disabled={$taskRunning}>{$t('common.save')}</button>
-          {/if}
-        </div>
-      </div>
-    </dialog>
   {/if}
 </div>

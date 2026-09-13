@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -23,17 +24,19 @@ import (
 
 // StartWebServer wires all routes and blocks serving HTTP. staticFiles must
 // be rooted at the built frontend (index.html at its top level).
-func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *sse.LogBroadcaster, port, progDir, version string, staticFiles fs.FS) {
-	h := NewHandlers(apiProfiles, apiCfgPath, logger, progDir, version)
+func StartWebServer(apiCfg *config.APIConfig, apiCfgPath string, logger *sse.LogBroadcaster, port, progDir, version string, staticFiles fs.FS) {
+	h := NewHandlers(apiCfg, apiCfgPath, logger, progDir, version)
 
 	mux := http.NewServeMux()
 
 	// Project management endpoints
 	mux.HandleFunc("GET /api/projects", h.GetProjects)
+	mux.HandleFunc("GET /api/projects/{name}/backup", h.GetProjectBackup)
+	mux.HandleFunc("POST /api/projects/restore", h.PostProjectRestore)
 	mux.HandleFunc("POST /api/projects", h.PostProject)
+	mux.HandleFunc("POST /api/projects/continue", h.PostContinuationProject)
 	mux.HandleFunc("GET /api/projects/current", h.GetProjectCurrent)
 	mux.HandleFunc("POST /api/projects/select", h.PostProjectSelect)
-	mux.HandleFunc("PUT /api/projects/{name}", h.RenameProject)
 	mux.HandleFunc("DELETE /api/projects/{name}", h.DeleteProject)
 
 	// Version endpoint (global, always available)
@@ -43,13 +46,6 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 	mux.HandleFunc("GET /api/config/api", h.GetAPIConfig)
 	mux.HandleFunc("PUT /api/config/api", h.PutAPIConfig)
 	mux.HandleFunc("POST /api/config/api/test", h.PostAPITest)
-	mux.HandleFunc("GET /api/config/api/profiles", h.GetAPIProfiles)
-	mux.HandleFunc("POST /api/config/api/profiles", h.PostAPIProfile)
-	mux.HandleFunc("PUT /api/config/api/profiles/{name}", h.PutAPIProfile)
-	mux.HandleFunc("DELETE /api/config/api/profiles/{name}", h.DeleteAPIProfile)
-	mux.HandleFunc("POST /api/config/api/profiles/{name}/select", h.PostAPIProfileSelect)
-	mux.HandleFunc("GET /api/config/api/models", h.GetAPIModels)
-	mux.HandleFunc("POST /api/config/api/models", h.PostAPIModels)
 
 	// Project-scoped endpoints (require project selection)
 	mux.HandleFunc("GET /api/config", h.GetConfig)
@@ -58,29 +54,19 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 	mux.HandleFunc("POST /api/config/apply-changes", h.PostApplyConfigChanges)
 	mux.HandleFunc("DELETE /api/config/pending-changes", h.DeletePendingConfigChanges)
 	mux.HandleFunc("GET /api/progress", h.GetProgress)
+	mux.HandleFunc("GET /api/knowledge", h.GetKnowledge)
+	mux.HandleFunc("POST /api/knowledge/sync", h.PostKnowledgeSync)
+	mux.HandleFunc("POST /api/settings/story-changes", h.PostSettingChange)
 	mux.HandleFunc("DELETE /api/progress", h.DeleteProgress)
 	mux.HandleFunc("GET /api/status", h.GetStatus)
 
-	mux.HandleFunc("POST /api/outline/generate", h.PostOutlineGenerate)
-	mux.HandleFunc("POST /api/outline/confirm", h.PostOutlineConfirm)
 	mux.HandleFunc("POST /api/outline/revise", h.PostOutlineRevise)
 	mux.HandleFunc("POST /api/outline/generate-continuation", h.PostOutlineGenerateContinuation)
+	mux.HandleFunc("POST /api/story/complete", h.PostStoryComplete)
+	mux.HandleFunc("POST /api/story/review", h.PostPlanningReview)
+	mux.HandleFunc("POST /api/story/resume", h.PostStoryResume)
 	mux.HandleFunc("POST /api/outline/characters/confirm", h.PostOutlineCharactersConfirm)
 	mux.HandleFunc("PUT /api/outline/{num}", h.PutChapterOutline)
-	mux.HandleFunc("POST /api/arcs/skeleton", h.PostArcSkeleton)
-	mux.HandleFunc("POST /api/arcs/{id}/outline", h.PostArcOutline)
-	mux.HandleFunc("POST /api/arcs/append", h.PostArcAppend)
-	mux.HandleFunc("POST /api/book-overview/generate", h.PostBookOverviewGenerate)
-	mux.HandleFunc("POST /api/book-overview/confirm", h.PostBookOverviewConfirm)
-	mux.HandleFunc("PUT /api/book-overview", h.PutBookOverview)
-	mux.HandleFunc("PUT /api/arcs/{id}", h.PutArc)
-	mux.HandleFunc("POST /api/arcs/{id}/outline-confirm", h.PostArcOutlineConfirm)
-	mux.HandleFunc("PUT /api/arcs/{id}/acts/{aid}", h.PutAct)
-	mux.HandleFunc("POST /api/arcs/{id}/acts/{aid}/outline", h.PostActOutline)
-	mux.HandleFunc("POST /api/arcs/{id}/acts/{aid}/outline-confirm", h.PostActOutlineConfirm)
-	mux.HandleFunc("POST /api/arcs/{id}/acts/{aid}/chapters", h.PostActChapters)
-	mux.HandleFunc("POST /api/arcs/{id}/acts/{aid}/chapters-confirm", h.PostActChaptersConfirm)
-	mux.HandleFunc("POST /api/arcs/{id}/acts/{aid}/summary", h.PostActSummary)
 
 	mux.HandleFunc("GET /api/chapters/{num}", h.GetChapterContent)
 	mux.HandleFunc("PUT /api/chapters/{num}/blocks/{id}", h.PutChapterBlock)
@@ -88,25 +74,29 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 	mux.HandleFunc("POST /api/chapters/{num}/blocks", h.PostChapterBlockInsert)
 	mux.HandleFunc("POST /api/chapters/{num}/blocks/{id}/revise", h.PostChapterBlockRevise)
 	mux.HandleFunc("GET /api/export/txt", h.GetBookExport)
+	mux.HandleFunc("GET /api/export/outline", h.GetOutlineExport)
 	mux.HandleFunc("POST /api/chapter/generate", h.PostChapterGenerate)
 	mux.HandleFunc("GET /api/chapter/conflict", h.GetChapterConflict)
 	mux.HandleFunc("POST /api/chapter/conflict-resolve", h.PostChapterConflictResolve)
 	mux.HandleFunc("POST /api/foreshadows/outline-check", h.PostForeshadowOutlineCheck)
 	mux.HandleFunc("POST /api/chapter/confirm", h.PostChapterConfirm)
-	mux.HandleFunc("POST /api/chapter/reject", h.PostChapterReject)
 	mux.HandleFunc("POST /api/chapter/edit", h.PostChapterEdit)
 	mux.HandleFunc("POST /api/chapter/revise", h.PostChapterRevise)
 	mux.HandleFunc("POST /api/chapter/revise/{num}", h.PostChapterReviseSpecific)
 	mux.HandleFunc("POST /api/chapter/polish", h.PostChapterPolish)
 	mux.HandleFunc("POST /api/chapters/smooth-transitions", h.PostChaptersSmoothTransitions)
 
-	mux.HandleFunc("GET /api/postprocess", h.GetPostProcess)
-	mux.HandleFunc("DELETE /api/postprocess", h.DeletePostProcess)
-	mux.HandleFunc("PUT /api/postprocess/roadmap", h.PutPostProcessRoadmap)
-	mux.HandleFunc("POST /api/postprocess/diagnose", h.PostPostProcessDiagnose)
-	mux.HandleFunc("POST /api/postprocess/consistency", h.PostPostProcessConsistency)
-	mux.HandleFunc("POST /api/postprocess/roadmap", h.PostPostProcessRoadmap)
-	mux.HandleFunc("POST /api/postprocess/execute", h.PostPostProcessExecute)
+	mux.HandleFunc("GET /api/proofread", h.GetProofread)
+	mux.HandleFunc("DELETE /api/proofread", h.DeleteProofread)
+	mux.HandleFunc("POST /api/proofread/backup", h.PostProofreadBackup)
+	mux.HandleFunc("POST /api/proofread/analyze", h.PostProofreadAnalyze)
+	mux.HandleFunc("POST /api/proofread/apply", h.PostProofreadApply)
+	mux.HandleFunc("PUT /api/proofread/issues/{id}", h.PutProofreadIssue)
+	mux.HandleFunc("POST /api/proofread/undo/{num}", h.PostProofreadUndo)
+	mux.HandleFunc("PUT /api/proofread/chapters/{num}/blocks/{id}", h.PutProofreadBlock)
+	mux.HandleFunc("DELETE /api/proofread/chapters/{num}/blocks/{id}", h.DeleteProofreadBlock)
+	mux.HandleFunc("POST /api/proofread/chapters/{num}/blocks", h.PostProofreadBlock)
+	mux.HandleFunc("GET /api/proofread/export", h.GetProofreadExport)
 	mux.HandleFunc("DELETE /api/chapter", h.DeleteChapter)
 	mux.HandleFunc("DELETE /api/chapters/from/{num}", h.DeleteChaptersFrom)
 	mux.HandleFunc("DELETE /api/outline", h.DeleteOutline)
@@ -150,21 +140,19 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 	mux.HandleFunc("POST /api/import/resume", h.PostImportResume)
 	mux.HandleFunc("GET /api/import/status", h.GetImportStatus)
 
-	// Legado (开源阅读) 书源：让未改动的 Legado 客户端通过网络导入书源阅读本站。
-	// 仅"主动输出"旁路数据，不参与本项目自身的任务/状态管理。
-	mux.HandleFunc("GET /api/legado/book-source.json", h.GetLegadoBookSource)
-	mux.HandleFunc("GET /api/legado/search", h.GetLegadoSearch)
-	mux.HandleFunc("GET /api/legado/book/{project}", h.GetLegadoBook)
-	mux.HandleFunc("GET /api/legado/chapter/{project}/{num}", h.GetLegadoChapter)
-
 	mux.HandleFunc("GET /api/skills", h.GetSkills)
 	mux.HandleFunc("PUT /api/skills/{id}/toggle", h.PutSkillToggle)
+	mux.HandleFunc("GET /api/skill-library", h.GetSkillLibrary)
+	mux.HandleFunc("POST /api/skill-library/install", h.PostSkillInstall)
+	mux.HandleFunc("GET /api/skill-library/{id}", h.GetSkillLibraryItem)
+	mux.HandleFunc("DELETE /api/skill-library/{id}", h.DeleteSkillLibraryItem)
+	mux.HandleFunc("POST /api/skill-library/{id}/validate", h.PostSkillValidate)
+	mux.HandleFunc("POST /api/skill-library/{id}/optimize", h.PostSkillOptimize)
 
 	mux.HandleFunc("GET /api/chat/sessions", h.GetChatSessions)
 	mux.HandleFunc("POST /api/chat/sessions", h.PostChatSession)
 	mux.HandleFunc("GET /api/chat/sessions/{id}", h.GetChatSession)
 	mux.HandleFunc("DELETE /api/chat/sessions/{id}", h.DeleteChatSession)
-	mux.HandleFunc("GET /api/chat/sessions/{id}/attachments/{file}", h.GetChatAttachment)
 	mux.HandleFunc("POST /api/chat/sessions/{id}/messages", h.PostChatMessage)
 
 	mux.HandleFunc("GET /api/events", h.SSEHandler)
@@ -189,7 +177,7 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 		fileServer.ServeHTTP(w, r)
 	})
 
-	handler := recoveryMiddleware(corsMiddleware(loggingMiddleware(mux)))
+	handler := recoveryMiddleware(corsMiddleware(loggingMiddleware(projectWriteMiddleware(mux))))
 
 	srv := &http.Server{
 		Addr:         port,
@@ -199,16 +187,13 @@ func StartWebServer(apiProfiles *config.APIProfiles, apiCfgPath string, logger *
 		IdleTimeout:  120 * time.Second,
 	}
 
-	fmt.Printf(" [系统] AI 小说生成器 Web UI 启动中...\n")
+	fmt.Printf(" [系统] AI 小说写手 Web UI 启动中...\n")
 	fmt.Printf(" [系统] 访问地址: http://localhost%s\n", port)
 	fmt.Printf(" [系统] 程序目录: %s\n", progDir)
 	fmt.Printf(" [系统] 项目目录: %s\n", filepath.Join(progDir, "storys"))
 
-	// Android blocks the faccessat2 syscall used by Go's exec.LookPath.
-	// Do not auto-launch a browser there; the URL above can be opened manually.
-	if runtime.GOOS != "linux" {
-		go openBrowser(fmt.Sprintf("http://localhost%s", port))
-	}
+	go openBrowser(fmt.Sprintf("http://localhost%s", port))
+
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, " [错误] 服务器启动失败: %v\n", err)
 		os.Exit(1)
@@ -227,40 +212,60 @@ func (h *Handlers) GetProjects(w http.ResponseWriter, r *http.Request) {
 
 	projects := make([]map[string]string, 0)
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".restore-") {
 			continue
 		}
 		name := entry.Name()
 		projectDir := filepath.Join(storysDir, name)
+		compatibility, err := detectProjectCompatibility(projectDir)
+		if err != nil {
+			compatibility = projectCompatibilityUnknown
+		}
 
 		// Get progress info if available
 		phase := ""
 		title := ""
+		bookStatus := ""
 		progressPath := filepath.Join(projectDir, "progress.json")
 		if data, err := os.ReadFile(progressPath); err == nil {
 			var p story.Progress
 			if json.Unmarshal(data, &p) == nil {
 				phase = p.Phase
 				title = p.Title
+				bookStatus = p.BookStatus
 			}
 		}
 
-		// Project language: read config.json's "language" field; default zh for old projects.
+		// Project language comes from config.json; old projects default to zh.
 		lang := i18n.LangZH
 		if data, err := os.ReadFile(filepath.Join(projectDir, "config.json")); err == nil {
 			var probe struct {
 				Language string `json:"language"`
+				Story    struct {
+					Title string `json:"title"`
+				} `json:"story"`
 			}
-			if json.Unmarshal(data, &probe) == nil && probe.Language != "" {
-				lang = i18n.NormalizeLanguage(probe.Language)
+			if json.Unmarshal(data, &probe) == nil {
+				if probe.Language != "" {
+					lang = i18n.NormalizeLanguage(probe.Language)
+				}
+				if probe.Story.Title != "" {
+					title = probe.Story.Title
+				}
 			}
 		}
 
+		formatVersion, appLine, recommended := compatibilityVersions(compatibility)
 		info := map[string]string{
-			"name":     name,
-			"phase":    phase,
-			"title":    title,
-			"language": lang,
+			"name":                    name,
+			"phase":                   phase,
+			"book_status":             bookStatus,
+			"title":                   title,
+			"language":                lang,
+			"compatibility":           compatibility,
+			"project_format":          formatVersion,
+			"compatible_app_line":     appLine,
+			"recommended_app_version": recommended,
 		}
 
 		// Get mod time for sorting
@@ -292,11 +297,9 @@ func (h *Handlers) PostProject(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(req.Name)
 	lang := i18n.NormalizeLanguage(req.Language)
 
-	for _, c := range name {
-		if c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' {
-			h.writeErrorReq(w, r, http.StatusBadRequest, "project_name_invalid_chars")
-			return
-		}
+	if !validProjectName(name) {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "project_name_invalid_chars")
+		return
 	}
 
 	projectDir := filepath.Join(h.storysDir(), name)
@@ -314,6 +317,7 @@ func (h *Handlers) PostProject(w http.ResponseWriter, r *http.Request) {
 	os.MkdirAll(sessionsDir, 0755)
 
 	cfg := config.DefaultConfigForLang(lang)
+	cfg.CreatedWithVersion = h.version
 	if err := config.SaveConfig(filepath.Join(projectDir, "config.json"), cfg); err != nil {
 		h.writeErrorReq(w, r, http.StatusInternalServerError, "init_project_config_failed", err)
 		return
@@ -348,83 +352,20 @@ func (h *Handlers) PostProjectSelect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.switchProject(req.Name); err != nil {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		if isProjectCompatibilityError(err) {
+			h.writeErrorReq(w, r, http.StatusConflict, "project_incompatible")
+			return
+		}
+		var chapterErr *story.ChapterLoadError
+		if errors.As(err, &chapterErr) {
+			h.writeErrorReq(w, r, http.StatusBadRequest, "chapter_load_failed", chapterErr.Num, chapterErr.Path, chapterErr.Err)
+			return
+		}
+		h.writeErrorReq(w, r, http.StatusBadRequest, "project_load_failed", err)
 		return
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]string{"name": h.projectName})
-}
-
-// validateProjectName checks a project name for the same rules as creation.
-func validateProjectName(name string) bool {
-	for _, c := range name {
-		if c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' {
-			return false
-		}
-	}
-	return true
-}
-
-func (h *Handlers) RenameProject(w http.ResponseWriter, r *http.Request) {
-	if h.isTaskRunning() {
-		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
-		return
-	}
-
-	oldName := r.PathValue("name")
-	if oldName == "" {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "missing_project_name")
-		return
-	}
-
-	var req struct {
-		Name string `json:"name"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "missing_project_name")
-		return
-	}
-
-	newName := strings.TrimSpace(req.Name)
-	if newName == oldName {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "project_name_same")
-		return
-	}
-	if !validateProjectName(newName) {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "project_name_invalid_chars")
-		return
-	}
-
-	h.projectMu.Lock()
-	defer h.projectMu.Unlock()
-
-	oldDir := filepath.Join(h.storysDir(), oldName)
-	newDir := filepath.Join(h.storysDir(), newName)
-
-	if _, err := os.Stat(oldDir); os.IsNotExist(err) {
-		h.writeErrorReq(w, r, http.StatusNotFound, "project_not_found")
-		return
-	}
-	if _, err := os.Stat(newDir); err == nil {
-		h.writeErrorReq(w, r, http.StatusConflict, "project_exists")
-		return
-	}
-
-	if err := os.Rename(oldDir, newDir); err != nil {
-		h.writeErrorReq(w, r, http.StatusInternalServerError, "rename_project_failed", err.Error())
-		return
-	}
-
-	wasCurrent := h.projectName == oldName
-	if wasCurrent {
-		h.updateProjectPathsLocked(newName)
-	}
-
-	h.logger.InfoKey("log.project_renamed", oldName, newName)
-	h.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"name":       newName,
-		"was_current": wasCurrent,
-	})
 }
 
 func (h *Handlers) DeleteProject(w http.ResponseWriter, r *http.Request) {
@@ -434,8 +375,8 @@ func (h *Handlers) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := r.PathValue("name")
-	if name == "" {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "missing_project_name")
+	if !validProjectName(name) {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "project_name_invalid_chars")
 		return
 	}
 
@@ -467,7 +408,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-UI-Locale, Accept-Language, X-Content-Rev, X-Confirm-Fact-Impact")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return

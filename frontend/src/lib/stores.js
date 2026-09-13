@@ -1,8 +1,6 @@
-import { writable, get } from 'svelte/store';
+import { writable } from 'svelte/store';
 
 export const apiConfig = writable(null);
-// { active, profiles: [{name, config}] } — multiple saved API configs.
-export const apiProfiles = writable(null);
 export const config = writable(null);
 export const progress = writable(null);
 export const settings = writable(null);
@@ -30,7 +28,6 @@ export const autoConfirm = writable(false);
 export const chatSessions = writable(null);
 export const currentChatSession = writable(null);
 
-export const editingChapterNum = writable(-1);
 export const editingCharID = writable(null);
 export const editingWvID = writable(null);
 export const wvFilter = writable('all');
@@ -44,10 +41,6 @@ export const lastFailedTask = writable(null);
 // 存全局 store 使其在切换页面后仍可见；表单内容与 snapshot 不一致时前端自动隐藏。
 export const apiTestResult = writable(null);
 
-// 结构化且无法自动恢复的保存失败(来自 HTTP 错误响应或后台任务 SSE)。
-// 由 StorageErrorModal 消费;存全局 store 使其在任意页面都能弹窗。
-export const storageError = writable(null);
-
 export function addLog(entry) {
   logEntries.update(entries => {
     const next = [...entries, entry];
@@ -57,9 +50,7 @@ export function addLog(entry) {
 
 export function addToast(msg, type = 'info') {
   const id = Date.now();
-  const unsub = toastStore.subscribe(() => {});
   toastStore.update(t => [...t, { id, msg, type }]);
-  unsub();
   setTimeout(() => {
     toastStore.update(t => t.filter(x => x.id !== id));
   }, 3000);
@@ -67,9 +58,10 @@ export function addToast(msg, type = 'info') {
 
 export const toastStore = writable([]);
 
-export const taskNotification = writable(null);
-
 export const confirmModal = writable(null);
+
+// Structured unrecoverable save failure from HTTP or background-task SSE.
+export const storageError = writable(null);
 
 export const postprocess = writable(null);
 

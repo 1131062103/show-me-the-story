@@ -84,6 +84,20 @@ func formatCharacterListForOutline(settings *ProjectSettings, lang string) strin
 	return sb.String()
 }
 
+func formatOutlineLengthRequirementBlock(minLen, maxLen int, lang string) string {
+	if i18n.NormalizeLanguage(lang) == i18n.LangEN {
+		return fmt.Sprintf("Each chapter outline must be %d–%d characters (not counting the chapter title). Outlines shorter than %d characters are unacceptable.", minLen, maxLen, minLen)
+	}
+	return fmt.Sprintf("每章 outline 字段正文须为 %d–%d 字（不含章节标题）。低于 %d 字视为不合格。", minLen, maxLen, minLen)
+}
+
+func formatOutlineStructureRequirementBlock(lang string) string {
+	if i18n.NormalizeLanguage(lang) == i18n.LangEN {
+		return "Each chapter outline must cover, in order: opening scene/location; core conflict or goal; key turning point or revelation; characters appearing (with roles); how the chapter ends or what hook it leaves."
+	}
+	return "每章大纲须依次包含：开场场景/地点；本章核心冲突或目标；关键转折或信息点；出场人物（及作用）；章末走向或悬念钩子。"
+}
+
 func buildOutlinePromptExtras(cfg *config.Config, settings *ProjectSettings) map[string]string {
 	minLen, maxLen := calcOutlineLengthRange(cfg.Story.TargetWordsPerChapter)
 	return map[string]string{
@@ -102,6 +116,16 @@ func mergeOutlinePromptData(base map[string]string, cfg *config.Config, settings
 		merged[k] = v
 	}
 	return merged
+}
+
+func finalizeOutlinePrompt(template, rendered string, cfg *config.Config, settings *ProjectSettings) string {
+	lang := cfg.Language
+	minLen, maxLen := calcOutlineLengthRange(cfg.Story.TargetWordsPerChapter)
+	if !strings.Contains(template, "{{.OutlineMinWords}}") {
+		block := formatOutlineLengthRequirementBlock(minLen, maxLen, lang) + "\n" + formatOutlineStructureRequirementBlock(lang)
+		rendered += "\n\n" + block
+	}
+	return rendered
 }
 
 func formatShortOutlineRetryFeedback(shortNums []int, minLen int, lang string) string {
@@ -156,7 +180,6 @@ func stubsFromStructuredCharacters(chars []OutlineChapterCharacter) []outlineCha
 	return stubs
 }
 
-// characterStubsForChapter builds character stubs from the chapter's structured cast.
 func characterStubsForChapter(ch ChapterState) []outlineCharacterStub {
 	return stubsFromStructuredCharacters(ch.Characters)
 }

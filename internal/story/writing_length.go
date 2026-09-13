@@ -102,6 +102,13 @@ func maybeUpdateBestDraft(bestContent *string, bestScore *int, content string, m
 	}
 }
 
+func formatChapterLengthRequirementBlock(minLen, maxLen, target int, lang string) string {
+	if i18n.NormalizeLanguage(lang) == i18n.LangEN {
+		return fmt.Sprintf("Chapter prose must be %d–%d words (target %d; tolerance ±%d words or ±%d%%, whichever is larger). Exceeding %d words is unacceptable — stay inside this chapter's outline only.", minLen, maxLen, target, chapterLengthToleranceAbsolute, chapterLengthTolerancePercent, maxLen)
+	}
+	return fmt.Sprintf("正文字数须严格控制在 %d–%d 字（目标 %d 字；允许误差 ±%d 字或 ±%d%%，取较大者）。超过 %d 字不可接受，只写本章大纲范围内的情节。", minLen, maxLen, target, chapterLengthToleranceAbsolute, chapterLengthTolerancePercent, maxLen)
+}
+
 func formatChapterLengthRetryFeedback(actual, minLen, maxLen int, lang string) string {
 	if actual > maxLen {
 		if i18n.NormalizeLanguage(lang) == i18n.LangEN {
@@ -125,6 +132,13 @@ func mergeWritingConstraints(a, b string) string {
 		return a
 	}
 	return a + "\n\n" + b
+}
+
+func finalizeChapterWritingPrompt(template, rendered string, minLen, maxLen, target int, lang string) string {
+	if !strings.Contains(template, "{{.TargetWordsMin}}") {
+		rendered += "\n\n" + formatChapterLengthRequirementBlock(minLen, maxLen, target, lang)
+	}
+	return rendered
 }
 
 func adjustChapterLength(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, content string, minLen, maxLen int, logger *sse.LogBroadcaster) (string, error) {

@@ -6,7 +6,6 @@ import (
 	"os"
 	"showmethestory/internal/fsutil"
 	"showmethestory/internal/i18n"
-	"sort"
 )
 
 type APIConfig struct {
@@ -16,15 +15,13 @@ type APIConfig struct {
 	Model               string `json:"model"`
 	MaxTokens           int    `json:"max_tokens,omitempty"` // 0 = 模型默认；新建默认 32768；Agent 调用建议 ≥ 8192
 	HTTPTimeoutSeconds  int    `json:"http_timeout_seconds"`
-	ContextBudgetTokens int    `json:"context_budget_tokens"` // 全书优化上下文预算，默认 900000
+	ContextBudgetTokens int    `json:"context_budget_tokens"` // 模型上下文预算，默认 300000
 }
 
 type Config struct {
-	// ProjectFormatVersion identifies the on-disk project layout. It is
-	// written when a v3 project is created so newer binaries never need to
-	// guess whether an unmarked project is safe to open.
 	ProjectFormatVersion int           `json:"project_format_version"`
-	Language             string        `json:"language"` // "zh" 或 "en"，影响 AI 提示词与生成内容；旧项目缺省视为 "zh"
+	CreatedWithVersion   string        `json:"created_with_version,omitempty"`
+	Language             string        `json:"language"` // "zh" 或 "en"，影响 AI 提示词与生成内容
 	Story                StoryConfig   `json:"story"`
 	Prompts              PromptsConfig `json:"prompts"`
 	SkillConfig          *SkillConfig  `json:"skill_config,omitempty"`
@@ -33,21 +30,12 @@ type Config struct {
 type StoryConfig struct {
 	Type                  string `json:"type"`
 	Title                 string `json:"title"`
-	ChapterCount          int    `json:"chapter_count"`
 	TargetWordsPerChapter int    `json:"target_words_per_chapter"`
 	WritingStyle          string `json:"writing_style"`
 	WritingPOV            string `json:"writing_pov"` // 叙述视角，如第一人称女主、第三人称限知等
-	StorySynopsis         string `json:"story_synopsis"`
-	// ChaptersPerAct is the target chapter count per act (幕) in the v4
-	// book → arc → act → chapter hierarchy. Default 40.
-	ChaptersPerAct int `json:"chapters_per_act,omitempty"`
-	// ActsPerArc is the target act count per volume (卷) hint used by the
-	// arc outline (卷纲) generation. Default 4, prompt suggests 3~5.
-	ActsPerArc int `json:"acts_per_arc,omitempty"`
 }
 
 type PromptsConfig struct {
-	OutlineGeneration             string `json:"outline_generation"`
 	ChapterWriting                string `json:"chapter_writing"`
 	ChapterRevision               string `json:"chapter_revision"`
 	ChapterSegmentRevision        string `json:"chapter_segment_revision"`
@@ -67,92 +55,9 @@ type PromptsConfig struct {
 	BookConsistencyCheck          string `json:"book_consistency_check"`
 	BookRoadmap                   string `json:"book_roadmap"`
 	MemoryUpdate                  string `json:"memory_update"`
-	ArcSkeleton                   string `json:"arc_skeleton"`
-	ArcChapterOutline             string `json:"arc_chapter_outline"`
-	ArcSummary                    string `json:"arc_summary"`
-	BookOverview                  string `json:"book_overview"`
-	ArcOutline                    string `json:"arc_outline"`
-	ActOutline                    string `json:"act_outline"`
-	ActChapterOutline             string `json:"act_chapter_outline"`
-	ActSummary                    string `json:"act_summary"`
+	HistoryCompression            string `json:"history_compression,omitempty"`
 	ImportMetaAnalysis            string `json:"import_meta_analysis"`
 	ImportChapterAnalysis         string `json:"import_chapter_analysis"`
-}
-
-// APIProfiles holds multiple named API configurations plus the name of the
-// currently active profile. Persisted in api.json under progDir.
-type APIProfiles struct {
-	Profiles map[string]*APIConfig `json:"profiles"`
-	Active   string                `json:"active"`
-}
-
-// NewAPIProfiles returns a fresh store with a single "default" profile.
-func NewAPIProfiles() *APIProfiles {
-	return &APIProfiles{
-		Profiles: map[string]*APIConfig{"default": DefaultAPIConfig()},
-		Active:   "default",
-	}
-}
-
-// Normalize repairs an APIProfiles store: fills missing defaults, ensures
-// non-nil profiles and a valid active name (default → first available).
-func (p *APIProfiles) Normalize() {
-	if p == nil {
-		return
-	}
-	if len(p.Profiles) == 0 {
-		p.Profiles = map[string]*APIConfig{"default": DefaultAPIConfig()}
-	}
-	for name, cfg := range p.Profiles {
-		if cfg == nil {
-			delete(p.Profiles, name)
-			continue
-		}
-		normalizeAPIConfig(cfg)
-	}
-	if p.Active == "" {
-		p.Active = "default"
-	}
-	if _, ok := p.Profiles[p.Active]; !ok {
-		if _, ok := p.Profiles["default"]; ok {
-			p.Active = "default"
-		} else {
-			names := make([]string, 0, len(p.Profiles))
-			for name := range p.Profiles {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			if len(names) > 0 {
-				p.Active = names[0]
-			}
-		}
-	}
-}
-
-// ActiveConfig returns the currently active profile, falling back to the first
-// available profile or a fresh default when nothing is usable.
-func (p *APIProfiles) ActiveConfig() *APIConfig {
-	if p == nil {
-		return DefaultAPIConfig()
-	}
-	if cfg, ok := p.Profiles[p.Active]; ok && cfg != nil {
-		return cfg
-	}
-	for _, cfg := range p.Profiles {
-		if cfg != nil {
-			return cfg
-		}
-	}
-	return DefaultAPIConfig()
-}
-
-func normalizeAPIConfig(cfg *APIConfig) {
-	if cfg.HTTPTimeoutSeconds <= 0 {
-		cfg.HTTPTimeoutSeconds = DefaultHTTPTimeoutSeconds
-	}
-	if cfg.ContextBudgetTokens <= 0 {
-		cfg.ContextBudgetTokens = DefaultContextBudgetTokens
-	}
 }
 
 // DefaultContextBudgetTokens is the fallback context budget when the model's
@@ -166,7 +71,7 @@ const DefaultMaxTokens = 32768
 const DefaultHTTPTimeoutSeconds = 600
 
 // ProjectFormatVersion is the only on-disk project layout this binary writes.
-const ProjectFormatVersion = 3
+const ProjectFormatVersion = 4
 
 func DefaultAPIConfig() *APIConfig {
 	return &APIConfig{
@@ -186,10 +91,7 @@ func DefaultConfigForLang(lang string) *Config {
 		ProjectFormatVersion: ProjectFormatVersion,
 		Language:             lang,
 		Story: StoryConfig{
-			ChapterCount:          12,
 			TargetWordsPerChapter: 5000,
-			ChaptersPerAct:        40,
-			ActsPerArc:            4,
 		},
 		SkillConfig: &SkillConfig{
 			EnabledSkills: make(map[string]bool),
@@ -234,37 +136,6 @@ func saveAPIConfig(path string, cfg *APIConfig) error {
 	return fsutil.WriteFileAtomic(path, data)
 }
 
-// LoadAPIProfiles loads the api.json profile store.
-func LoadAPIProfiles(path string) (*APIProfiles, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			p := NewAPIProfiles()
-			if saveErr := SaveAPIProfiles(path, p); saveErr != nil {
-				return nil, fmt.Errorf("创建默认API配置失败: %w", saveErr)
-			}
-			return p, nil
-		}
-		return nil, fmt.Errorf("读取API配置文件失败: %w", err)
-	}
-
-	var p APIProfiles
-	if err := json.Unmarshal(data, &p); err != nil {
-		return nil, fmt.Errorf("解析API配置文件失败: %w", err)
-	}
-	p.Normalize()
-	return &p, nil
-}
-
-// SaveAPIProfiles atomically writes the whole profile store to api.json.
-func SaveAPIProfiles(path string, p *APIProfiles) error {
-	data, err := json.MarshalIndent(p, "", "  ")
-	if err != nil {
-		return err
-	}
-	return fsutil.WriteFileAtomic(path, data)
-}
-
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -283,17 +154,8 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
 
-	if cfg.Story.ChapterCount <= 0 {
-		cfg.Story.ChapterCount = 12
-	}
 	if cfg.Story.TargetWordsPerChapter <= 0 {
 		cfg.Story.TargetWordsPerChapter = 5000
-	}
-	if cfg.Story.ChaptersPerAct <= 0 {
-		cfg.Story.ChaptersPerAct = 40
-	}
-	if cfg.Story.ActsPerArc <= 0 {
-		cfg.Story.ActsPerArc = 4
 	}
 
 	cfg.Language = i18n.NormalizeLanguage(cfg.Language)
@@ -335,14 +197,10 @@ func SaveConfig(path string, cfg *Config) error {
 	return fsutil.WriteFileAtomic(path, data)
 }
 
-// applyDefaults fills empty fields with the language-specific defaults.
-// Existing non-empty fields are NEVER overwritten — this is what makes
-// old projects (with persisted Chinese prompts) keep working after upgrade.
+// ApplyDefaults fills empty fields with language-specific defaults without
+// overwriting customized prompts.
 func (p *PromptsConfig) ApplyDefaults(lang string) {
 	defaults := DefaultPromptsForLang(lang)
-	if p.OutlineGeneration == "" {
-		p.OutlineGeneration = defaults.OutlineGeneration
-	}
 	if p.ChapterWriting == "" {
 		p.ChapterWriting = defaults.ChapterWriting
 	}
@@ -400,29 +258,8 @@ func (p *PromptsConfig) ApplyDefaults(lang string) {
 	if p.MemoryUpdate == "" {
 		p.MemoryUpdate = defaults.MemoryUpdate
 	}
-	if p.ArcSkeleton == "" {
-		p.ArcSkeleton = defaults.ArcSkeleton
-	}
-	if p.ArcChapterOutline == "" {
-		p.ArcChapterOutline = defaults.ArcChapterOutline
-	}
-	if p.ArcSummary == "" {
-		p.ArcSummary = defaults.ArcSummary
-	}
-	if p.BookOverview == "" {
-		p.BookOverview = defaults.BookOverview
-	}
-	if p.ArcOutline == "" {
-		p.ArcOutline = defaults.ArcOutline
-	}
-	if p.ActOutline == "" {
-		p.ActOutline = defaults.ActOutline
-	}
-	if p.ActChapterOutline == "" {
-		p.ActChapterOutline = defaults.ActChapterOutline
-	}
-	if p.ActSummary == "" {
-		p.ActSummary = defaults.ActSummary
+	if p.HistoryCompression == "" {
+		p.HistoryCompression = defaults.HistoryCompression
 	}
 	if p.ImportMetaAnalysis == "" {
 		p.ImportMetaAnalysis = defaults.ImportMetaAnalysis

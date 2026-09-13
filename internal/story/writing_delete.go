@@ -12,7 +12,6 @@ var (
 	ErrNoChaptersToDelete         = errors.New("no chapters to delete")
 	ErrWritingChapterCannotDelete = errors.New("writing chapter cannot delete")
 	ErrDeleteFrontierUnavailable  = errors.New("delete frontier unavailable")
-	ErrReviewRejectUnavailable    = errors.New("review reject unavailable")
 )
 
 // ResolveDeleteChapterTarget returns the chapter index eligible for delete_chapter:
@@ -68,7 +67,14 @@ func chapterHasDeletableContent(ch *ChapterState) bool {
 func purgeMemoryForChapter(state *Progress, chapterNum int) {
 	filtered := state.MemoryEntries[:0]
 	for _, m := range state.MemoryEntries {
-		if m.Chapter != chapterNum {
+		keep := m.Inherited
+		for _, ref := range m.References {
+			if ref.Chapter != chapterNum {
+				keep = true
+				break
+			}
+		}
+		if keep {
 			filtered = append(filtered, m)
 		}
 	}
@@ -81,7 +87,6 @@ func clearChapterContentAt(state *Progress, projectDir string, idx int) {
 	ch.Content = ""
 	ch.Summary = ""
 	ch.Status = StatusPending
-	ch.Finalized = false
 	purgeMemoryForChapter(state, ch.Num)
 }
 
@@ -102,25 +107,6 @@ func DeleteFrontierChapter(state *Progress, projectDir string) (int, error) {
 	num := state.Chapters[idx].Num
 	clearChapterContentAt(state, projectDir, idx)
 	adjustCurrentChapterIndexAfterDelete(state, idx)
-	return num, nil
-}
-
-// RejectChapterAction 审核驳回：仅当写作指针处的章节正等待用户确认（review）时可用。
-// 驳回即清除该章正文与该章记忆（含被推迟生成的摘要/记忆占位），并把写作指针留在本章，
-// 便于用户重新生成。与 DeleteFrontierChapter（写作回退）的区别在于它只对 review 审核章
-// 生效，语义上是对「审核」流程的明示否定，而非通用的前沿正文清除。
-func RejectChapterAction(state *Progress, projectDir string) (int, error) {
-	idx := state.CurrentChapterIndex
-	if idx < 0 || idx >= len(state.Chapters) {
-		return 0, ErrNoChaptersToDelete
-	}
-	ch := &state.Chapters[idx]
-	if ch.Status != StatusReview {
-		return 0, ErrReviewRejectUnavailable
-	}
-	num := ch.Num
-	clearChapterContentAt(state, projectDir, idx)
-	state.CurrentChapterIndex = idx
 	return num, nil
 }
 

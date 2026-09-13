@@ -21,60 +21,6 @@
   $: taskLogs = ($logEntries || []).slice(-20);
   let taskStatusCollapsed = false;
 
-  // 附件状态：待发送文件（name/type/data base64）+ 上次发送的附件（重试复用）
-  let pendingFiles = [];
-  let fileInputEl;
-  let lastSentAttachments = [];
-  const MAX_ATTACH_COUNT = 5;
-  const MAX_ATTACH_BYTES = 8 * 1024 * 1024;
-  const IMAGE_TYPE_RE = /^image\/(jpeg|png|gif|webp)$/;
-  const TEXT_TYPE_RE = /^text\/(plain|markdown)$/;
-
-  function isAllowedFile(file) {
-    if (IMAGE_TYPE_RE.test(file.type) || TEXT_TYPE_RE.test(file.type)) return true;
-    return /\.(txt|md)$/i.test(file.name);
-  }
-  function readFileAsBase64(file) {
-    return new Promise(resolve => {
-      const fr = new FileReader();
-      fr.onload = () => {
-        const s = fr.result || '';
-        resolve(s.includes(',') ? s.slice(s.indexOf(',') + 1) : s);
-      };
-      fr.onerror = () => resolve('');
-      fr.readAsDataURL(file);
-    });
-  }
-  async function pickFiles(e) {
-    const files = Array.from(e.target.files || []);
-    if (e.target) e.target.value = '';
-    for (const f of files) {
-      if (pendingFiles.length >= MAX_ATTACH_COUNT) {
-        addToast($t('chat.attach.tooMany', { n: MAX_ATTACH_COUNT }), 'error');
-        break;
-      }
-      if (f.size > MAX_ATTACH_BYTES) {
-        addToast($t('chat.attach.tooLarge', { name: f.name }), 'error');
-        continue;
-      }
-      if (!isAllowedFile(f)) {
-        addToast($t('chat.attach.unsupported', { name: f.name }), 'error');
-        continue;
-      }
-      const data = await readFileAsBase64(f);
-      if (!data) continue;
-      pendingFiles = [...pendingFiles, { name: f.name, type: f.type || 'application/octet-stream', data }];
-    }
-  }
-  function removePending(i) {
-    pendingFiles = pendingFiles.filter((_, j) => j !== i);
-  }
-  function attUrl(att) {
-    if (att.data) return 'data:' + (att.type || 'image/png') + ';base64,' + att.data;
-    const file = (att.path || '').split('/').pop();
-    return `/api/chat/sessions/${$currentChatSession?.id}/attachments/${file}`;
-  }
-
   const dangerTools = new Set(['delete_chapter', 'delete_chapters_from', 'delete_outline', 'reset_progress']);
 
   function toolLabel(name) {
@@ -101,13 +47,13 @@
 
   // 重试 API 端点映射
   const retryEndpoints = {
-    'outline_generation': { method: 'POST', url: '/api/outline/generate' },
     'outline_revision': { method: 'POST', url: '/api/outline/revise' },
     'chapter_generation': { method: 'POST', url: '/api/chapter/generate' },
     'chapter_revision': { method: 'POST', url: '/api/chapter/revise' },
     'foreshadow_suggest': { method: 'POST', url: '/api/foreshadows/suggest' },
     'continuation_outline': { method: 'POST', url: '/api/outline/generate-continuation' },
     'settings_reconciliation': { method: 'POST', url: '/api/settings/reconcile' },
+    'knowledge_sync': { method: 'POST', url: '/api/knowledge/sync' },
   };
 
   function isHallucinatedWait(msg, allMsgs, idx) {
@@ -228,23 +174,14 @@
     if (inputEl) inputEl.style.height = 'auto';
     autoScroll = true;
 
-    const attachments = pendingFiles.map(f => ({ name: f.name, type: f.type, data: f.data }));
-    pendingFiles = [];
-    lastSentAttachments = attachments;
-
     currentChatSession.update(s => {
       if (!s) return s;
-      const messages = [...(s.messages || []), {
-        role: 'user',
-        content: msg,
-        attachments: attachments.map(a => ({ name: a.name, type: a.type, data: a.data, path: '' })),
-        timestamp: new Date().toISOString(),
-      }];
+      const messages = [...(s.messages || []), { role: 'user', content: msg, timestamp: new Date().toISOString() }];
       return { ...s, messages, streaming_text: '', pending_tool_calls: [] };
     });
 
     try {
-      await api('POST', '/api/chat/sessions/' + $currentChatSession.id + '/messages', { content: msg, context_page: contextPage, attachments });
+      await api('POST', '/api/chat/sessions/' + $currentChatSession.id + '/messages', { content: msg, context_page: contextPage });
     } catch (e) { addToast(e.message, 'error'); }
   }
 
@@ -275,7 +212,6 @@
         const lastUserMsg = [...$currentChatSession.messages].reverse().find(m => m.role === 'user');
         if (lastUserMsg) {
           chatInput = lastUserMsg.content;
-          pendingFiles = lastSentAttachments;
           await sendMessage();
           return;
         }
@@ -302,26 +238,26 @@
   ];
 </script>
 
-<div class="flex flex-col h-full min-h-0">
+<div class="flex flex-col h-full">
   <!-- 会话栏 -->
-  <div class="border-b border-base-content/10 px-2 sm:px-3 py-2 flex items-center gap-1.5 sm:gap-2 shrink-0">
+  <div class="border-b border-base-content/10 px-3 py-2 flex items-center gap-2 shrink-0">
     <button
-      class="btn btn-sm gap-1 border border-base-content/20 hover:border-primary/50 hover:bg-base-300 transition-colors shrink-0"
+      class="btn btn-sm gap-1 border border-base-content/20 hover:border-primary/50 hover:bg-base-300 transition-colors"
       class:border-primary={showSessionList}
       class:bg-base-300={showSessionList}
       on:click={() => showSessionList = !showSessionList}
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
-      <span class="hidden sm:inline">{$t('chat.session.menu')}</span>
+      {$t('chat.session.menu')}
       <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 transition-transform" class:rotate-180={showSessionList} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
     </button>
-    <span class="text-sm text-base-content/50 truncate flex-1 min-w-0">
+    <span class="text-sm text-base-content/50 truncate flex-1">
       {$currentChatSession?.title || $t('chat.session.placeholder')}
     </span>
     {#if $taskRunning}
-      <button class="btn btn-error btn-xs gap-1 shrink-0" on:click={stopTask}>{$t('chat.session.stop')}</button>
+      <button class="btn btn-error btn-xs gap-1" on:click={stopTask}>{$t('chat.session.stop')}</button>
     {/if}
-    <button class="btn btn-primary btn-xs shrink-0" on:click={createSession} disabled={$taskRunning}>{$t('chat.session.new')}</button>
+    <button class="btn btn-primary btn-xs" on:click={createSession} disabled={$taskRunning}>{$t('chat.session.new')}</button>
   </div>
 
   {#if showSessionList}
@@ -338,7 +274,7 @@
             <div class="text-sm font-medium truncate">{s.title}</div>
             <div class="text-xs text-base-content/40">{new Date(s.updated_at).toLocaleString($uiLocale === 'en' ? 'en-US' : 'zh-CN')} · {$t('chat.session.msgs', { n: s.msg_count || 0 })}</div>
           </div>
-          <button class="btn btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100 transition-opacity" on:click={(e) => deleteSession(s.id, e)}>{$t('common.delete')}</button>
+          <button class="btn btn-error btn-outline btn-xs opacity-0 group-hover:opacity-100 transition-opacity" on:click={(e) => deleteSession(s.id, e)}>{$t('common.delete')}</button>
         </div>
       {/each}
       {#if sessions.length === 0}
@@ -352,17 +288,19 @@
     <div class="border-b border-base-content/10 shrink-0">
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
-      <div class="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-base-300/50" on:click={() => taskStatusCollapsed = !taskStatusCollapsed}>
+      <div class="px-3 py-1.5 cursor-pointer hover:bg-base-300/50" on:click={() => taskStatusCollapsed = !taskStatusCollapsed}>
+        <div class="flex items-center gap-2">
+          {#if $taskRunning}
+            <span class="loading loading-spinner loading-xs text-warning"></span>
+          {:else}
+            <span class="text-success text-xs">●</span>
+          {/if}
+          <span class="text-xs font-semibold text-base-content/70">{$currentTaskName || $t('chat.task.placeholder')}{$taskRunning ? $t('chat.task.running') : $t('chat.task.ended')}</span>
+          <span class="text-xs text-base-content/40 ml-auto">{taskStatusCollapsed ? $t('chat.task.expand') : $t('chat.task.collapse')}</span>
+        </div>
         {#if $taskRunning}
-          <span class="loading loading-spinner loading-xs text-warning"></span>
-        {:else}
-          <span class="text-success text-xs">●</span>
+          <div class="mt-1 pl-5"><TaskTokenBadge className="badge badge-xs badge-info gap-1 font-mono whitespace-nowrap" /></div>
         {/if}
-        <span class="text-xs font-semibold text-base-content/70">{$currentTaskName || $t('chat.task.placeholder')}{$taskRunning ? $t('chat.task.running') : $t('chat.task.ended')}</span>
-        {#if $taskRunning}
-          <TaskTokenBadge />
-        {/if}
-        <span class="text-xs text-base-content/40 ml-auto">{taskStatusCollapsed ? $t('chat.task.expand') : $t('chat.task.collapse')}</span>
       </div>
       {#if !taskStatusCollapsed && taskLogs.length > 0}
         <div class="max-h-[150px] overflow-y-auto px-3 py-1 font-mono text-xs leading-relaxed space-y-0.5">
@@ -396,19 +334,6 @@
       {#each msgs as m, msgIdx}
         {#if m.role === 'user'}
           <div class="chat chat-end">
-            {#if m.attachments?.length > 0}
-              <div class="chat-bubble chat-bubble-primary px-2 py-1.5 mb-1 flex flex-wrap gap-1.5 max-w-[85%]">
-                {#each m.attachments as att}
-                  {#if att.type?.startsWith('image/')}
-                    <a href={attUrl(att)} target="_blank" rel="noopener">
-                      <img src={attUrl(att)} alt={att.name} class="w-14 h-14 object-cover rounded border border-base-content/10" loading="lazy" />
-                    </a>
-                  {:else}
-                    <span class="text-xs text-base-content/80 flex items-center gap-1 max-w-[160px] truncate">📄 {att.name}</span>
-                  {/if}
-                {/each}
-              </div>
-            {/if}
             <div class="chat-bubble chat-bubble-primary text-sm whitespace-pre-wrap max-w-[85%]">{m.content}</div>
             <div class="chat-footer text-xs text-base-content/30 mt-0.5">{fmtTime(m.timestamp)}</div>
           </div>
@@ -515,36 +440,17 @@
 
   <!-- 输入区 -->
   {#if $currentChatSession}
-    <div class="border-t border-base-content/10 p-2 shrink-0">
-      {#if pendingFiles.length > 0}
-        <div class="flex flex-wrap gap-1.5 pb-2">
-          {#each pendingFiles as f, i}
-            <div class="flex items-center gap-1 badge badge-ghost badge-sm px-2 max-w-[200px]">
-              {#if f.type?.startsWith('image/')}
-                <img src={'data:' + f.type + ';base64,' + f.data} alt={f.name} class="w-5 h-5 object-cover rounded shrink-0" />
-              {:else}
-                <span class="shrink-0">📄</span>
-              {/if}
-              <span class="truncate text-xs">{f.name}</span>
-              <button class="btn btn-xs btn-circle btn-ghost h-4 w-4 min-h-0 shrink-0" on:click={() => removePending(i)} title={$t('chat.attach.remove')}>✕</button>
-            </div>
-          {/each}
-        </div>
-      {/if}
-      <div class="flex gap-2 items-end">
-        <button class="btn btn-ghost btn-sm shrink-0" on:click={() => fileInputEl?.click()} disabled={$taskRunning || pendingFiles.length >= MAX_ATTACH_COUNT} title={$t('chat.attach.button')}>📎</button>
-        <input bind:this={fileInputEl} type="file" accept="image/*,.txt,.md,.markdown" multiple class="hidden" on:change={pickFiles} />
-        <textarea
-          bind:this={inputEl}
-          class="textarea textarea-sm flex-1 min-h-[38px] max-h-[120px] resize-none text-base leading-relaxed"
-          bind:value={chatInput}
-          placeholder={$taskRunning ? $t('chat.input.placeholderBusy') : $t('chat.input.placeholder')}
-          on:keydown={handleKeydown}
-          on:input={autoGrow}
-          disabled={$taskRunning}
-        ></textarea>
-        <button class="btn btn-primary btn-sm" on:click={sendMessage} disabled={$taskRunning || !chatInput.trim()}>{$t('chat.input.send')}</button>
-      </div>
+    <div class="border-t border-base-content/10 p-2 flex gap-2 items-end shrink-0">
+      <textarea
+        bind:this={inputEl}
+        class="textarea textarea-sm flex-1 min-h-[38px] max-h-[120px] resize-none text-base leading-relaxed"
+        bind:value={chatInput}
+        placeholder={$taskRunning ? $t('chat.input.placeholderBusy') : $t('chat.input.placeholder')}
+        on:keydown={handleKeydown}
+        on:input={autoGrow}
+        disabled={$taskRunning}
+      ></textarea>
+      <button class="btn btn-primary btn-sm" on:click={sendMessage} disabled={$taskRunning || !chatInput.trim()}>{$t('chat.input.send')}</button>
     </div>
   {/if}
 </div>

@@ -1,13 +1,10 @@
 *.json
 *.exe
-# Claude Code 会话临时文件
-.claude/*.local.json.tmp.*
-/show-me-the-story*
+/show-me-the-story
 .kilo
 storys/
 frontend/node_modules
 frontend/dist
 showmethestory
 dev.log
-skills/*
-!skills/.gitkeep
+graphify-out/

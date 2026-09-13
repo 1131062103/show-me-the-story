@@ -19,9 +19,6 @@ type Character struct {
 	Motivation  string `json:"motivation,omitempty"`
 	Abilities   string `json:"abilities,omitempty"`
 	Notes       string `json:"notes,omitempty"`
-	// Acts restricts this setting to specific acts (幕); empty means global
-	// (applies to every act). Only meaningful in v4 book→arc→act projects.
-	Acts []int `json:"acts,omitempty"`
 }
 
 type WorldviewEntry struct {
@@ -30,8 +27,6 @@ type WorldviewEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Tags        string `json:"tags,omitempty"`
-	// Acts restricts this setting to specific acts (幕); empty means global.
-	Acts []int `json:"acts,omitempty"`
 }
 
 type Organization struct {
@@ -40,8 +35,6 @@ type Organization struct {
 	Type        string   `json:"type"`
 	Description string   `json:"description"`
 	Members     []string `json:"members,omitempty"`
-	// Acts restricts this setting to specific acts (幕); empty means global.
-	Acts []int `json:"acts,omitempty"`
 }
 
 type Relation struct {
@@ -54,6 +47,8 @@ type Relation struct {
 }
 
 type ProjectSettings struct {
+	StoryChanges  []SettingChange  `json:"story_changes,omitempty"`
+	StorySynced   map[int]string   `json:"story_synced,omitempty"`
 	Characters    []Character      `json:"characters"`
 	Worldview     []WorldviewEntry `json:"worldview"`
 	Organizations []Organization   `json:"organizations"`
@@ -100,6 +95,9 @@ func nextID(prefix string, existingIDs []string) string {
 
 func (ps *ProjectSettings) allIDs() []string {
 	var ids []string
+	for _, c := range ps.StoryChanges {
+		ids = append(ids, c.EntityID)
+	}
 	for _, c := range ps.Characters {
 		ids = append(ids, c.ID)
 	}

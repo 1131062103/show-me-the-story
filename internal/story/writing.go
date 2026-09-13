@@ -92,6 +92,17 @@ func isChapterMetaLine(line string, lang string) bool {
 	return false
 }
 
+func formatWritingPOVBlock(pov, lang string) string {
+	pov = strings.TrimSpace(pov)
+	if pov == "" {
+		return ""
+	}
+	if i18n.NormalizeLanguage(lang) == i18n.LangEN {
+		return "[Narrative POV] " + pov
+	}
+	return "【叙述视角】" + pov
+}
+
 func formatExtraWritingConstraintsBlock(constraints, lang string) string {
 	constraints = strings.TrimSpace(constraints)
 	if constraints == "" {
@@ -103,7 +114,10 @@ func formatExtraWritingConstraintsBlock(constraints, lang string) string {
 	return "【补充写作约束（事实核查冲突调和）】\n" + constraints
 }
 
-func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, state *Progress, progressPath string, settings *ProjectSettings, logger *sse.LogBroadcaster) error {
+func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, state *Progress, progressPath string, settings *ProjectSettings, skills []Skill, logger *sse.LogBroadcaster) error {
+	if err := SyncPendingKnowledge(ctx, apiCfg, cfg, state, settings, progressPath, logger); err != nil {
+		return err
+	}
 	if err := llm.ValidateConfig(apiCfg); err != nil {
 		return err
 	}
@@ -116,25 +130,13 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 	}
 
 	i := state.CurrentChapterIndex
+	if err := EnsureNarrativeCheckpoints(ctx, apiCfg, cfg, state, progressPath, logger); err != nil {
+		return err
+	}
 	ch := &state.Chapters[i]
 
 	if ch.Status == StatusAccepted {
 		return fmt.Errorf("第 %d 章已确认，请确认当前章节或重置进度", ch.Num)
-	}
-
-	// v4 幕闸：章纲未确认的幕，禁止生成正文。
-	if len(state.Arcs) > 0 && state.BookOverview != "" {
-		if act := actForChapterNum(state, ch.Num); act != nil && !act.ChaptersConfirmed {
-			return fmt.Errorf("第 %d 章属于尚未确认章纲的幕《%s》（第%d~%d章），请先在大纲页确认该幕的章纲", ch.Num, act.Title, act.StartCh, act.EndCh)
-		}
-	}
-
-	// v4 幕摘要闸：进入新幕（第 2 幕起）前，前一幕已完结但尚无幕摘要时暂停，
-	// 由用户在大纲页确认生成幕摘要后再继续，保证跨幕前情衔接。
-	if len(state.Arcs) > 0 && state.BookOverview != "" {
-		if prev := actBeforeChapterNum(state, ch.Num); prev != nil && actCompleted(state, prev) && prev.Summary == "" {
-			return fmt.Errorf("第 %d 章将进入新幕，前一幕《%s》（第%d~%d章）已完结但尚无幕摘要，请先在大纲页生成并确认该幕的幕摘要", ch.Num, prev.Title, prev.StartCh, prev.EndCh)
-		}
 	}
 
 	ch.Status = StatusWriting
@@ -144,15 +146,10 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 
 	logger.InfoKey("log.chapter_start", ch.Num, ch.Title)
 
-	// v3 层级大纲：懒生成已完结卷的卷摘要（失败只告警，不阻塞写作）。
-	if len(state.Arcs) > 0 {
-		EnsureArcSummaries(ctx, apiCfg, cfg, state, progressPath, logger)
-	}
-
 	// 写前检查：本章大纲若已与实际写出的剧情冲突（如大纲安排初遇但前文已认识），
 	// 先最小化修订大纲再动笔，避免按过时大纲写出矛盾内容。
 	if i > 0 {
-		logger.StepInfo(1, 3, "正在检查本章大纲与当前剧情的一致性...")
+		logger.StepInfo(1, 6, "正在检查本章大纲与当前剧情的一致性...")
 		revised, err := checkOutlineConsistency(ctx, apiCfg, cfg, state, i, logger)
 		if err != nil {
 			logger.WarnKey("log.outline_check_failed", err)
@@ -171,6 +168,15 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 	}
 
 	maxFactCheckRetries := 3
+	factSkills := ResolveSkills(skills, cfg.SkillConfig, SkillScopeChapterFactCheck, cfg.Language)
+	factCtx := llm.WithPromptAddon(ctx, FormatSkillsContent(factSkills))
+	if len(factSkills) > 0 {
+		names := make([]string, len(factSkills))
+		for i, s := range factSkills {
+			names[i] = s.Name
+		}
+		logger.InfoKey("log.skills_activated", strings.Join(names, ", "))
+	}
 	extraConstraints := ""
 	var accumulatedIssues []string
 
@@ -178,7 +184,7 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 		if ctx.Err() != nil {
 			return fmt.Errorf("任务已取消")
 		}
-		logger.StepInfo(2, 3, "正在构思并撰写正文...")
+		logger.StepInfo(2, 6, "正在构思并撰写正文...")
 		content, err := generateChapterContentWithLengthControl(ctx, apiCfg, cfg, state, i, settings, extraConstraints, logger)
 		if err != nil {
 			return err
@@ -189,9 +195,17 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 		ch.Content = content
 		logger.InfoKey("log.prose_done", prose.CountProseUnits(content))
 
-		logger.StepInfo(3, 3, "正在对本章进行事实核查...")
+		logger.StepInfo(3, 6, "正在提炼本章摘要...")
+		summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, content, logger)
+		if summary == "" {
+			return fmt.Errorf("摘要提炼失败或被取消")
+		}
+		ch.Summary = summary
+		logger.InfoKey("log.summary_done")
+
+		logger.StepInfo(4, 6, "正在对本章进行事实核查...")
 		historySummary := buildHistorySummary(state, i)
-		factCheckResult := generateChapterFactCheckWithRetryLog(ctx, apiCfg, cfg, state, i, content, historySummary, logger)
+		factCheckResult := generateChapterFactCheckWithRetryLog(factCtx, apiCfg, cfg, state, i, content, historySummary, logger)
 
 		failed, issues := parseFactCheckResult(factCheckResult)
 		if failed {
@@ -220,7 +234,12 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 					return fmt.Errorf("正文生成失败或被取消")
 				}
 				ch.Content = content
-				factCheckResult = generateChapterFactCheckWithRetryLog(ctx, apiCfg, cfg, state, i, content, historySummary, logger)
+				summary = generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, content, logger)
+				if summary == "" {
+					return fmt.Errorf("摘要提炼失败或被取消")
+				}
+				ch.Summary = summary
+				factCheckResult = generateChapterFactCheckWithRetryLog(factCtx, apiCfg, cfg, state, i, content, historySummary, logger)
 				failed, issues = parseFactCheckResult(factCheckResult)
 				if failed {
 					accumulatedIssues = mergeUniqueIssues(accumulatedIssues, splitFactCheckIssues(issues))
@@ -246,9 +265,18 @@ func GenerateChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *c
 
 	state.PendingWritingConflict = nil
 
-	// v4（分阶段）：摘要、伏笔更新、叙事记忆与 markdown 落盘推迟到用户确认后
-	// （ConfirmAndFinalizeChapterAction）再生成，避免章节被驳回/回退时浪费这两步调用。
-	ch.Finalized = false
+	if len(state.Foreshadows) > 0 {
+		logger.StepInfo(5, 6, "正在更新伏笔状态...")
+		syncForeshadowsAfterChapter(ctx, apiCfg, cfg, state, i, progressPath, logger)
+	}
+
+	logger.StepInfo(6, 6, "正在维护叙事记忆...")
+	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, i, progressPath, logger)
+	// Memory sync commits a copied chapter slice, so refresh the chapter reference.
+	ch = &state.Chapters[i]
+
+	SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
+
 	ch.Status = StatusReview
 	state.CurrentChapterIndex = i
 	if err := SaveProgress(progressPath, state); err != nil {
@@ -344,7 +372,7 @@ func ReviseChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *con
 	}
 
 	chapterIdx := state.CurrentChapterIndex
-	if chapterIdx >= len(state.Chapters) {
+	if chapterIdx < 0 || chapterIdx >= len(state.Chapters) {
 		return fmt.Errorf("章节索引越界")
 	}
 
@@ -395,12 +423,6 @@ func ReviseChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *con
 	}
 
 	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, chapterIdx, progressPath, logger)
-
-	// 修订已重新生成摘要与记忆，章节视为已完成后处理（Finalized）。
-	ch.Finalized = true
-	if err := SaveProgress(progressPath, state); err != nil {
-		return err
-	}
 
 	logger.SuccessKey("log.chapter_revised")
 	return nil
@@ -467,30 +489,22 @@ func ReviseSpecificChapterAction(ctx context.Context, apiCfg *config.APIConfig, 
 
 	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, chapterIdx, progressPath, logger)
 
-	// 定向修订已重新生成摘要与记忆，章节视为已完成后处理。
-	ch.Finalized = true
-	if err := SaveProgress(progressPath, state); err != nil {
-		return err
-	}
-
 	logger.SuccessKey("log.chapter_specific_done", ch.Num)
 	return nil
 }
 
-// ConfirmAndFinalizeChapterAction 确认当前审核章节，并在确认的同时补齐被推迟的
-// 后处理产物（摘要、伏笔更新、叙事记忆、markdown 文件），然后推进写作指针。
-// 这是分阶段写作的核心：正文在 GenerateChapterAction 完成，摘要/记忆等延迟到用户
-// 确认后再生成，避免章节被驳回/回退时浪费这两步 LLM 调用。
-func ConfirmAndFinalizeChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, state *Progress, progressPath string, settings *ProjectSettings, logger *sse.LogBroadcaster) error {
-	if err := llm.ValidateConfig(apiCfg); err != nil {
-		return err
-	}
+func ConfirmChapterAction(state *Progress, progressPath string) error {
+	original := state
+	next := *state
+	next.Chapters = append([]ChapterState(nil), state.Chapters...)
+	next.NarrativeCheckpoints = append([]NarrativeCheckpoint(nil), state.NarrativeCheckpoints...)
+	state = &next
 	if state.Phase != "writing" {
 		return fmt.Errorf("当前不在写作阶段")
 	}
 
 	chapterIdx := state.CurrentChapterIndex
-	if chapterIdx >= len(state.Chapters) {
+	if chapterIdx < 0 || chapterIdx >= len(state.Chapters) {
 		return fmt.Errorf("章节索引越界")
 	}
 
@@ -499,38 +513,13 @@ func ConfirmAndFinalizeChapterAction(ctx context.Context, apiCfg *config.APIConf
 		return fmt.Errorf("当前章节不在审核状态，无法确认")
 	}
 
-	logger.InfoKey("log.chapter_confirming", ch.Num, ch.Title)
-
-	// 先补齐本章后处理产物（需 ch.Content），再推进指针。
-	if !ch.Finalized {
-		logger.StepInfo(1, 3, "正在提炼本章摘要...")
-		summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, ch.Content, logger)
-		if summary == "" {
-			logger.WarnKey("log.finalize_summary_failed", ch.Num)
-		} else {
-			ch.Summary = summary
-			logger.InfoKey("log.summary_done")
-		}
-
-		logger.StepInfo(2, 3, "正在更新伏笔状态...")
-		if len(state.Foreshadows) > 0 {
-			syncForeshadowsAfterChapter(ctx, apiCfg, cfg, state, chapterIdx, progressPath, logger)
-		}
-
-		logger.StepInfo(3, 3, "正在维护叙事记忆...")
-		syncMemoryAfterChapter(ctx, apiCfg, cfg, state, chapterIdx, progressPath, logger)
-
-		SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
-		ch.Finalized = true
-	}
-
 	ch.Status = StatusAccepted
+	ch.KnowledgeTracked = true
 	state.CurrentChapterIndex = chapterIdx + 1
 	if err := SaveProgress(progressPath, state); err != nil {
 		return err
 	}
-
-	logger.SuccessKey("log.chapter_confirmed", ch.Num)
+	*original = *state
 	return nil
 }
 
@@ -547,9 +536,7 @@ func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig,
 
 	foreshadowContext := formatActiveForeshadowsForChapterLang(state.Foreshadows, ch.Num, lang)
 
-	actID := actIDForChapter(state, ch.Num)
-	characterContext := buildCharacterContextForLang(settings, ch, lang, actID)
-	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang, actID)
+	characterContext, worldviewContext := buildChapterSettingsContexts(settings, ch, lang)
 	outlineConstraints := buildOutlineConstraintsForLang(state, idx, lang)
 	memoryContext := buildMemoryForLang(state, idx, lang)
 
@@ -560,7 +547,7 @@ func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig,
 		"Title":              preferUserValue(cfg.Story.Title, state.Title),
 		"ChapterNum":         fmt.Sprintf("%d", ch.Num),
 		"CorePrompt":         state.CorePrompt,
-		"StorySynopsis":      preferUserValue(cfg.Story.StorySynopsis, state.StorySynopsis),
+		"StorySynopsis":      ChapterSynopsis(cfg, state, ch.Num),
 		"HistorySummary":     historySummary,
 		"PreviousEnding":     buildPreviousChapterTailForLang(state, idx, lang),
 		"ChapterTitle":       ch.Title,
@@ -576,6 +563,7 @@ func generateChapterContentStream(ctx context.Context, apiCfg *config.APIConfig,
 		"Memory":             memoryContext,
 		"OutlineConstraints": outlineConstraints,
 	})
+	userPrompt = finalizeChapterWritingPrompt(cfg.Prompts.ChapterWriting, userPrompt, minLen, maxLen, targetWords, lang)
 	if block := formatExtraWritingConstraintsBlock(extraWritingConstraints, lang); block != "" {
 		userPrompt += "\n\n" + block
 	}
@@ -663,7 +651,7 @@ func generateChapterFactCheck(ctx context.Context, apiCfg *config.APIConfig, cfg
 	ch := state.Chapters[idx]
 	lang := cfg.Language
 	outlineConstraints := buildOutlineConstraintsForLang(state, idx, lang)
-	memoryContext := buildMemoryForLang(state, idx, lang)
+	memoryContext := buildMemoryForLang(state, idx, lang, content)
 
 	userPrompt := config.RenderPrompt(cfg.Prompts.FactCheck, map[string]string{
 		"ChapterContent":     content,
@@ -673,7 +661,6 @@ func generateChapterFactCheck(ctx context.Context, apiCfg *config.APIConfig, cfg
 		"OutlineConstraints": outlineConstraints,
 		"Memory":             memoryContext,
 	})
-
 	systemPrompt := i18n.SystemPromptFor(lang, "fact_checker_json")
 	return llm.CallAPI(ctx, apiCfg, systemPrompt, userPrompt)
 }
@@ -805,9 +792,9 @@ func reviseChapterSegment(ctx context.Context, apiCfg *config.APIConfig, cfg *co
 	}
 
 	historySummary := buildHistorySummaryForLang(state, chapterIdx, lang)
-	actID := actIDForChapter(state, ch.Num)
-	characterContext := buildCharacterContextForLang(settings, ch, lang, actID)
-	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang, actID)
+	contextChapter := ch
+	contextChapter.Outline += "\n" + feedbackForAI
+	characterContext, worldviewContext := buildChapterSettingsContexts(settings, contextChapter, lang)
 
 	userPrompt := config.RenderPrompt(cfg.Prompts.ChapterSegmentRevision, map[string]string{
 		"ChapterNum":       fmt.Sprintf("%d", ch.Num),
@@ -822,6 +809,8 @@ func reviseChapterSegment(ctx context.Context, apiCfg *config.APIConfig, cfg *co
 		"SegmentOriginal":  segmentOriginal,
 		"UserFeedback":     feedbackForAI,
 	})
+	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterSegmentRevision, userPrompt, "{{.UserFeedback}}", feedbackForAI)
+	userPrompt += factProtection(state, ch.Num, lang)
 
 	systemPrompt := state.CorePrompt
 	if systemPrompt == "" {
@@ -867,9 +856,9 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 	lang := cfg.Language
 
 	historySummary := buildHistorySummaryForLang(state, chapterIdx, lang)
-	actID := actIDForChapter(state, ch.Num)
-	characterContext := buildCharacterContextForLang(settings, ch, lang, actID)
-	worldviewContext := buildWorldviewContextForLang(settings, ch.Outline, lang, actID)
+	contextChapter := ch
+	contextChapter.Outline += "\n" + userFeedback
+	characterContext, worldviewContext := buildChapterSettingsContexts(settings, contextChapter, lang)
 
 	userPrompt := config.RenderPrompt(cfg.Prompts.ChapterRevision, map[string]string{
 		"ChapterNum":       fmt.Sprintf("%d", ch.Num),
@@ -883,6 +872,8 @@ func reviseChapterContentStream(ctx context.Context, apiCfg *config.APIConfig, c
 		"OriginalContent":  ch.Content,
 		"UserFeedback":     userFeedback,
 	})
+	userPrompt = appendIfMissingPlaceholder(cfg.Prompts.ChapterRevision, userPrompt, "{{.UserFeedback}}", userFeedback)
+	userPrompt += factProtection(state, ch.Num, lang)
 
 	systemPrompt := state.CorePrompt
 	if systemPrompt == "" {
@@ -968,6 +959,14 @@ func reviseSubsequentOutlines(ctx context.Context, apiCfg *config.APIConfig, cfg
 // futureOutlineWindow 注入后续章节大纲的窗口大小（章数）
 const futureOutlineWindow = 10
 
+// that omit a supported placeholder.
+func appendIfMissingPlaceholder(template, rendered, placeholder, block string) string {
+	if strings.TrimSpace(block) == "" || strings.Contains(template, placeholder) {
+		return rendered
+	}
+	return rendered + "\n\n" + strings.TrimSpace(block)
+}
+
 func buildHistorySummary(state *Progress, idx int) string {
 	return buildHistorySummaryForLang(state, idx, i18n.LangZH)
 }
@@ -1047,6 +1046,7 @@ func SmoothTransitionsAction(ctx context.Context, apiCfg *config.APIConfig, cfg 
 			"Opening":        opening,
 		})
 		systemPrompt := i18n.SystemPromptFor(cfg.Language, "transition_editor")
+		userPrompt += factProtection(state, ch.Num, cfg.Language)
 
 		resp := llm.CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)
 		if resp == "" {
@@ -1069,6 +1069,7 @@ func SmoothTransitionsAction(ctx context.Context, apiCfg *config.APIConfig, cfg 
 			ch.Content = revised + "\n\n" + strings.TrimLeft(rest, "\n")
 		}
 		SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
+		ch.KnowledgeTracked = true
 		if err := SaveProgress(progressPath, state); err != nil {
 			return err
 		}
@@ -1119,6 +1120,7 @@ func PolishChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *con
 	}
 
 	systemPrompt := i18n.SystemPromptFor(cfg.Language, "polish_editor")
+	userPrompt += factProtection(state, ch.Num, cfg.Language)
 
 	onChunk := func(chunk string) {
 		logger.ContentChunk(chapterIdx, chunk)
@@ -1131,6 +1133,7 @@ func PolishChapterAction(ctx context.Context, apiCfg *config.APIConfig, cfg *con
 	}
 
 	ch.Content = stripChapterMetaProse(result, cfg.Language)
+	ch.KnowledgeTracked = true
 	ch.Status = StatusReview
 
 	SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
@@ -1166,82 +1169,9 @@ func nextMemoryID(entries []MemoryEntry) int {
 	return maxID + 1
 }
 
-// syncMemoryAfterChapter extracts narrative memory from a chapter and updates the memory store.
-// For revised chapters, old memories from that chapter are automatically deleted before re-extraction.
 func syncMemoryAfterChapter(ctx context.Context, apiCfg *config.APIConfig, cfg *config.Config, state *Progress, idx int, progressPath string, logger *sse.LogBroadcaster) {
-	if ctx.Err() != nil {
-		return
-	}
-
-	ch := state.Chapters[idx]
-	lang := cfg.Language
-
-	if state.MemoryMaxTokens <= 0 {
-		snapshot := state.StoryConfigSnapshot
-		if snapshot == nil {
-			snapshot = &cfg.Story
-		}
-		state.MemoryMaxTokens = calcMemoryMaxTokens(snapshot.ChapterCount, snapshot.TargetWordsPerChapter)
-	}
-
-	// Delete old memories from this chapter (for revised chapters)
-	var filtered []MemoryEntry
-	for _, m := range state.MemoryEntries {
-		if m.Chapter != ch.Num {
-			filtered = append(filtered, m)
-		}
-	}
-	state.MemoryEntries = filtered
-
-	existingMemory := formatMemoryForUpdatePrompt(state.MemoryEntries, lang)
-
-	userPrompt := config.RenderPrompt(cfg.Prompts.MemoryUpdate, map[string]string{
-		"Title":           preferUserValue(cfg.Story.Title, state.Title),
-		"ChapterNum":      fmt.Sprintf("%d", ch.Num),
-		"ChapterTitle":    ch.Title,
-		"ChapterOutline":  ch.Outline,
-		"ChapterContent":  ch.Content,
-		"ExistingMemory":  existingMemory,
-		"MemoryMaxTokens": fmt.Sprintf("%d", state.MemoryMaxTokens),
-	})
-
-	systemPrompt := i18n.SystemPromptFor(lang, "memory_manager")
-	if systemPrompt == "" {
-		systemPrompt = "你是一位精准的小说叙事记忆管理员。"
-	}
-
-	result := llm.CallAPIWithRetryLog(ctx, apiCfg, systemPrompt, userPrompt, logger)
-
-	newMemories, updates, err := parseMemoryUpdateResult(result)
-	if err != nil {
-		logger.InfoKey("log.memory_update_failed")
-		return
-	}
-
-	for _, u := range updates {
-		if u.Action == "delete" {
-			for j := len(state.MemoryEntries) - 1; j >= 0; j-- {
-				if state.MemoryEntries[j].ID == u.ID {
-					state.MemoryEntries = append(state.MemoryEntries[:j], state.MemoryEntries[j+1:]...)
-					break
-				}
-			}
-		}
-	}
-
-	for _, nm := range newMemories {
-		entry := MemoryEntry{
-			ID:       nextMemoryID(state.MemoryEntries),
-			Content:  nm.Content,
-			Category: nm.Category,
-			Chapter:  ch.Num,
-			Position: nm.Position,
-		}
-		state.MemoryEntries = append(state.MemoryEntries, entry)
-	}
-
-	if err := SaveProgress(progressPath, state); err != nil {
-		logger.InfoKey("log.memory_save_failed")
+	if err := SyncChapterMemory(ctx, apiCfg, cfg, state, idx, progressPath, logger); err != nil {
+		logger.WarnKey("log.knowledge_failed", err)
 	}
 }
 

@@ -6,7 +6,7 @@ func TestEditChapterOutlineStatuses(t *testing.T) {
 	mk := func(status string) *Progress {
 		return &Progress{Chapters: []ChapterState{{Num: 1, Title: "旧", Outline: "旧大纲", Status: status}}}
 	}
-	for _, status := range []string{StatusPending} {
+	for _, status := range []string{StatusPending, StatusWriting, StatusReview} {
 		state := mk(status)
 		if err := EditChapterOutline(state, 1, "新标题", "新大纲", nil); err != nil {
 			t.Fatalf("status %s: unexpected err: %v", status, err)
@@ -15,14 +15,12 @@ func TestEditChapterOutlineStatuses(t *testing.T) {
 			t.Fatalf("status %s: edit not applied: %+v", status, state.Chapters[0])
 		}
 	}
-	for _, status := range []string{StatusWriting, StatusReview, StatusAccepted} {
-		state := mk(status)
-		if err := EditChapterOutline(state, 1, "x", "y", nil); err == nil {
-			t.Fatalf("%s chapter outline should be rejected", status)
-		}
-		if state.Chapters[0].Title != "旧" || state.Chapters[0].Outline != "旧大纲" {
-			t.Fatalf("%s chapter must not change on failed edit", status)
-		}
+	state := mk(StatusAccepted)
+	if err := EditChapterOutline(state, 1, "x", "y", nil); err == nil {
+		t.Fatal("accepted chapter outline should be rejected")
+	}
+	if state.Chapters[0].Title != "旧" {
+		t.Fatal("accepted chapter must not change on failed edit")
 	}
 }
 
@@ -64,9 +62,9 @@ func TestContinuationOutlineAllowed(t *testing.T) {
 	}{
 		{"outline", 1, true},
 		{"writing", 10, true},
-		{"outline", 0, false},
-		{"writing", 0, false},
-		{"", 5, false},
+		{"outline", 0, true},
+		{"writing", 0, true},
+		{"", 5, true},
 		{"done", 5, false},
 	}
 	for _, c := range cases {

@@ -50,18 +50,13 @@ func main() {
 	storysDir := filepath.Join(progDir, "storys")
 	os.MkdirAll(storysDir, 0755)
 
-	// Create external skills directory (standard-format markdown skills)
-	externalSkillsDir := filepath.Join(progDir, "skills")
-	os.MkdirAll(externalSkillsDir, 0755)
-
 	// Load API config (global, shared across projects; always in progDir)
 	apiCfgPath := filepath.Join(progDir, "api.json")
-	apiProfiles, err := config.LoadAPIProfiles(apiCfgPath)
+	apiCfg, err := config.LoadAPIConfig(apiCfgPath)
 	if err != nil {
 		fmt.Printf(" [错误] 加载API配置失败: %v\n", err)
 		os.Exit(1)
 	}
-	apiCfg := apiProfiles.ActiveConfig()
 	llm.EnsureContextBudget(apiCfg)
 
 	if apiCfg.BaseURL == "" || apiCfg.Model == "" {
@@ -84,7 +79,6 @@ func main() {
 	fmt.Printf(" [系统] 版本: %s\n", version)
 	fmt.Printf(" [系统] 程序目录: %s\n", progDir)
 	fmt.Printf(" [系统] 项目目录: %s\n", storysDir)
-	fmt.Printf(" [系统] 外置技能目录: %s\n", externalSkillsDir)
 	if devlog.Enabled() {
 		fmt.Printf(" [系统] 开发日志: %s\n", filepath.Join(progDir, "dev.log"))
 	}
@@ -94,5 +88,5 @@ func main() {
 		log.Fatalf("嵌入静态文件失败: %v", err)
 	}
 
-	httpapi.StartWebServer(apiProfiles, apiCfgPath, logger, port, progDir, version, staticFS)
+	httpapi.StartWebServer(apiCfg, apiCfgPath, logger, port, progDir, version, staticFS)
 }

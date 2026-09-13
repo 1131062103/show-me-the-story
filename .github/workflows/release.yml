@@ -9,7 +9,10 @@ permissions:
   contents: write
 
 jobs:
+  checks:
+    uses: ./.github/workflows/check.yml
   release:
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -66,9 +69,9 @@ jobs:
             GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "$out" .
             name="show-me-the-story-${GITHUB_REF_NAME}-${goos}-${goarch}"
             if [ "$goos" = "windows" ]; then
-              zip -qr "release/${name}.zip" "$out" skills
+              zip -q "release/${name}.zip" "$out"
             else
-              tar -czf "release/${name}.tar.gz" "$out" skills
+              tar -czf "release/${name}.tar.gz" "$out"
             fi
             rm -f "$out"
           done
