@@ -843,6 +843,7 @@ export default {
   'log.skill_optimization_failed': 'Skill AI 优化失败：{0}',
 
   // ---- Chat panel ----
+  'chat.panel.title': '创作助理',
   'chat.session.placeholder': '未选择会话',
   'chat.session.collapse': '收起',
   'chat.session.menu': '会话列表',

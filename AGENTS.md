@@ -51,7 +51,7 @@ main.go
 ```
 
 - `main.go`：程序目录、API 配置、开发日志、嵌入前端和服务装配。
-- `internal/httpapi/`：路由、请求校验、项目管理、异步任务互斥、SSE 和本地化错误。
+- `internal/httpapi/`：路由、请求校验、项目管理、异步任务互斥、SSE、本地化错误和 Legado 书源只读适配。
 - `internal/agent/`：助理循环、工具解析与执行、危险操作确认。
 - `internal/story/`：大纲、写作、事实与设定、伏笔、导入、Skill、会话、校订等领域逻辑。
 - `internal/llm/`：OpenAI 兼容客户端、流式完整性、重试、token 统计、JSON 提取。
@@ -114,6 +114,13 @@ main.go
 - 校订报告锚定章节/block；正文变动后刷新锚点。校订不触发写作知识同步。
 - 完稿后创建的续写项目以 `inherited` 标记前作章节与伏笔；前作章节保留为规划上下文但不计入新项目章节进度，伏笔使用独立快照并在界面标明继承来源语义。
 
+### Legado 书源
+
+- `internal/httpapi/legado.go` 为未改动的 Legado 客户端提供 `/api/legado/*` 四个只读端点；书源地址 `http://<地址>:48090/api/legado/book-source.json` 记录在 README。
+- 只读旁路：不参与项目选择、任务互斥、正文写入和 v4 恢复事务；书名与目录只读 `progress.json` 元数据，仅正文端点调用 `story.LoadProgress`。
+- 所有 URL 由请求的 `Host`（含 `X-Forwarded-Proto`）推导为绝对地址，规则统一使用 JSONPath；`{project}` 必须经 `validProjectName` 校验，禁止路径穿越。
+- 章节标题按项目语言补序号（`第N章` / `Chapter N: `），已带序号的标题不得重复加前缀。
+
 ## LLM、提示词与 Skill
 
 - API 地址通过 `resolveChatCompletionsURL` 统一解析；严格模式只补 `/chat/completions`，普通裸域名补 `/v1/chat/completions`。
@@ -135,6 +142,8 @@ main.go
 - 全局平面风格：`--depth: 0`，无阴影；主要操作实心语义色，普通操作 `btn-outline`，弱操作 `btn-ghost`，危险操作 `btn-error btn-outline`。
 - `tabs-box` 是统一描边分段控件；活动项主色填充。正文段落 hover 淡底、点击选中，文字操作栏仅在选中后显示。
 - 中间工作区与助理约 2:1，助理宽 18–28rem；中间列必须 `min-w-0`，写作正文网格使用 `minmax(0, 1fr)`。
+- 窄屏（`md` 以下，48rem）为单列：左侧导航变为顶部横向滚动条，助理改为右下角按钮打开的全屏浮层，不改动桌面三栏布局。新增页面不得写死像素列宽或依赖 `col-span`/`grid-cols-2` 才能排布——窄屏下这些会产生隐式列或溢出；双列表单用 `grid-cols-1 sm:grid-cols-2`。
+- 全局高度使用 `100dvh` 并保留 `100vh` 回退；窄屏输入框字号至少 16px，避免 iOS 聚焦时自动缩放。
 - 写作章节列表宽 345px；章节正文按需加载，重复点击当前章节必须能够重试失败请求。
 - 事实/设定面板位于正文卡片内并默认折叠；摘要常驻，事实标记可展开并定位来源段落。
 - 核心操作必须有直接页面按钮，不依赖聊天；破坏性操作用 `ConfirmModal`，基础可访问性不得为精简让步。

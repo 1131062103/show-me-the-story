@@ -504,8 +504,8 @@
     <!-- 进度 -->
     <div class="card bg-base-200">
       <div class="card-body p-4 gap-2">
-        <div class="flex items-center gap-3">
-          <h2 class="card-title text-base flex-1">{$t('writing.progress.title')}</h2>
+        <div class="flex items-center gap-3 flex-wrap">
+          <h2 class="card-title text-base flex-1 min-w-max">{$t('writing.progress.title')}</h2>
           <label class="flex items-center gap-1.5 cursor-pointer" title={$t('writing.progress.autoConfirmTip')}>
             <input type="checkbox" class="toggle toggle-xs toggle-success" checked={$autoConfirm} on:change={toggleAutoConfirm} />
             <span class="text-xs text-base-content/60">{$t('writing.progress.autoConfirm')}</span>
@@ -606,7 +606,7 @@
     {/if}
 
     <!-- 章节区 -->
-    <div class="grid grid-cols-[345px_minmax(0,1fr)] gap-3" style="min-height:400px">
+    <div class="grid grid-cols-1 @2xl:grid-cols-[345px_minmax(0,1fr)] gap-3" style="min-height:400px">
       <!-- 章节列表 -->
       <div class="card bg-base-200  overflow-y-auto max-h-[calc(100vh-280px)]">
         <ul class="menu menu-sm p-0 w-full">

@@ -20,6 +20,7 @@
   import StorageErrorModal from './components/StorageErrorModal.svelte';
 
   let chatPanel;
+  let mobileChatOpen = false;
   let initializing = true;
   let restoring = false;
   let restoreTimer;
@@ -128,9 +129,9 @@
   }
 </script>
 
-<div class="flex flex-col h-screen bg-base-300 text-base-content overflow-hidden">
+<div class="flex flex-col h-full bg-base-300 text-base-content overflow-hidden">
   <!-- Header -->
-  <header class="navbar bg-base-200 border-b border-base-content/10 px-4 min-h-[46px] shrink-0 gap-2 flex-wrap">
+  <header class="navbar bg-base-200 border-b border-base-content/10 px-2 md:px-4 min-h-[46px] shrink-0 gap-1.5 md:gap-2 flex-wrap">
     <span class="text-lg font-semibold">{$t('app.title')}</span>
     {#if appVersion}
       <span class="badge badge-xs badge-ghost font-mono">{appVersion}</span>
@@ -185,9 +186,9 @@
       <Projects />
     </main>
   {:else}
-    <div class="flex flex-1 overflow-hidden">
-      <!-- Left: vertical nav -->
-      <nav class="flex flex-col w-44 shrink-0 bg-base-200 border-r border-base-content/10 py-3 px-2 gap-0.5">
+    <div class="flex flex-col md:flex-row flex-1 overflow-hidden">
+      <!-- Left: vertical nav（窄屏为可横向滚动的顶部导航条） -->
+      <nav class="nav-scroll flex flex-row md:flex-col w-full md:w-44 shrink-0 bg-base-200 border-b md:border-b-0 md:border-r border-base-content/10 py-1.5 md:py-3 px-2 gap-0.5 overflow-x-auto md:overflow-x-hidden md:overflow-y-auto">
         {#each [
           ['config', '⚙️', 'nav.config'],
           ['outline', '📝', 'nav.outline'],
@@ -199,7 +200,7 @@
           ['skills', '🧩', 'nav.skills']
         ] as [page, icon, labelKey]}
           <button
-            class="btn btn-sm justify-start w-full gap-2 px-3 text-sm {$currentPage === page ? 'btn-primary font-medium' : 'btn-ghost'}"
+            class="btn btn-sm justify-start w-auto md:w-full shrink-0 whitespace-nowrap gap-2 px-3 text-sm {$currentPage === page ? 'btn-primary font-medium' : 'btn-ghost'}"
             on:click={() => window.location.hash = '#' + page}
           >
             <span class="text-xs">{icon}</span>{$t(labelKey)}
@@ -208,7 +209,7 @@
       </nav>
 
       <!-- Center: page content -->
-      <main class="@container flex-[2] min-w-0 overflow-y-auto p-4 border-r border-base-content/10">
+      <main class="@container flex-[2] min-w-0 overflow-y-auto p-3 md:p-4 md:border-r border-base-content/10">
         {#if $currentPage === 'config'}
           <Config {sendToChat} />
         {:else if $currentPage === 'outline'}
@@ -228,10 +229,26 @@
         {/if}
       </main>
 
-      <!-- Right: Chat Panel -->
-      <div class="flex-1 min-w-72 max-w-md bg-base-200 overflow-hidden">
-        <ChatPanel bind:this={chatPanel} contextPage={$currentPage} />
+      <!-- Right: Chat Panel（窄屏为全屏浮层，由右下角按钮打开） -->
+      <div
+        class="flex-col min-w-0 bg-base-200 overflow-hidden md:flex md:flex-1 md:min-w-72 md:max-w-md {mobileChatOpen
+          ? 'flex max-md:fixed max-md:inset-0 max-md:z-40'
+          : 'hidden md:flex'}"
+      >
+        <div class="md:hidden flex items-center gap-2 px-3 py-1.5 bg-base-300 border-b border-base-content/10 shrink-0">
+          <span class="text-sm font-medium flex-1">{$t('chat.panel.title')}</span>
+          <button class="btn btn-ghost btn-xs" on:click={() => mobileChatOpen = false}>{$t('common.close')}</button>
+        </div>
+        <div class="flex-1 min-h-0">
+          <ChatPanel bind:this={chatPanel} contextPage={$currentPage} />
+        </div>
       </div>
+
+      <button
+        class="btn btn-primary btn-circle fixed bottom-4 right-4 z-30 md:hidden"
+        on:click={() => mobileChatOpen = true}
+        aria-label={$t('chat.panel.title')}
+      >💬</button>
     </div>
   {/if}
 

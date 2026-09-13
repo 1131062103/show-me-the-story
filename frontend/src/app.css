@@ -41,7 +41,24 @@
 
 html, body, #app {
   height: 100vh;
+  height: 100dvh; /* 移动端地址栏收放时保持满屏，避免底部被裁切 */
   overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 窄屏顶部导航条：隐藏横向滚动条，不占用高度 */
+@media (width < 48rem) {
+  .nav-scroll {
+    scrollbar-width: none;
+  }
+  .nav-scroll::-webkit-scrollbar {
+    display: none;
+  }
+  /* iOS 聚焦小于 16px 的输入框会自动放大页面 */
+  input, select, textarea {
+    font-size: 16px;
+  }
 }
 
 body {

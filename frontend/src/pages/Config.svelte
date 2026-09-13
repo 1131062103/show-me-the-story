@@ -452,8 +452,8 @@
     <div class="card bg-base-200">
       <div class="card-body p-4 gap-2">
         <h3 class="card-title text-base">{$t('config.api.title')}</h3>
-        <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
-          <div class="col-span-2">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
+          <div class="sm:col-span-2">
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.baseUrl')}</span>
             <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.openai.com/v1" disabled={$taskRunning || testingApi} />
             <label class="label cursor-pointer justify-start gap-2 py-1 px-0 min-h-0">
@@ -479,7 +479,7 @@
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.maxTokens')}</span>
             <input type="number" class="input input-sm w-full" bind:value={localApiCfg.max_tokens} placeholder="{$t('config.api.maxTokens.placeholder')}" disabled={$taskRunning || testingApi} title={$t('config.api.maxTokens.tooltip')} />
           </div>
-          <div class="col-span-2">
+          <div class="sm:col-span-2">
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.key')}</span>
             <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi} />
           </div>
@@ -514,7 +514,7 @@
             <span>{$t('config.story.acceptedHint')}</span>
           </div>
         {/if}
-        <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
           <div>
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.story.type')}</span>
             <input type="text" class="input input-sm w-full" bind:value={localStoryCfg.type} placeholder={$t('config.story.type.placeholder')} disabled={$taskRunning} />
@@ -585,7 +585,7 @@
 
         {#if showCharForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.char.name')}</span>
                 <input type="text" class="input input-sm w-full" bind:value={charName} disabled={$taskRunning} />
@@ -595,7 +595,7 @@
                 <input type="text" class="input input-sm w-full" bind:value={charAge} disabled={$taskRunning} />
               </div>
             </div>
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.char.appearance')}</span>
                 <textarea class="textarea textarea-sm w-full h-14 text-sm" bind:value={charAppearance} disabled={$taskRunning}></textarea>
@@ -678,7 +678,7 @@
 
         {#if showWvForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.wv.name')}</span>
                 <input type="text" class="input input-sm w-full" bind:value={wvName} disabled={$taskRunning} />
@@ -755,7 +755,7 @@
 
         {#if showOrgForm}
           <div class="bg-base-300 rounded-lg p-3 space-y-2 mt-1">
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
                 <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.org.name')}</span>
                 <input type="text" class="input input-sm w-full" bind:value={orgName} disabled={$taskRunning} />

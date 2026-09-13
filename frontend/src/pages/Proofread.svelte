@@ -103,7 +103,7 @@
       </div></div>
     {/if}
 
-    <div class="grid grid-cols-[345px_minmax(0,1fr)] gap-3 min-h-[520px]">
+    <div class="grid grid-cols-1 @2xl:grid-cols-[345px_minmax(0,1fr)] gap-3 min-h-[520px]">
       <div class="card bg-base-200"><div class="card-body p-3 gap-2 overflow-y-auto max-h-[70vh]">
         <div class="flex gap-1"><select class="select select-xs flex-1" bind:value={selectedStatus}><option value="all">{$t('proofread.allStatus')}</option><option value="pending">{$t('proofread.pending')}</option><option value="resolved">{$t('proofread.resolved')}</option><option value="ignored">{$t('proofread.ignored')}</option></select><select class="select select-xs flex-1" bind:value={selectedCategory}><option value="all">{$t('proofread.allCategory')}</option>{#each categories as c}<option value={c}>{$t('proofread.category.' + c)}</option>{/each}</select></div>
         {#each filtered as issue}

@@ -839,6 +839,7 @@ export default {
   'log.skill_optimization_failed': 'Skill AI optimization failed: {0}',
 
   // ---- Chat panel ----
+  'chat.panel.title': 'Assistant',
   'chat.session.placeholder': 'No session selected',
   'chat.session.collapse': 'Collapse',
   'chat.session.menu': 'Sessions',
